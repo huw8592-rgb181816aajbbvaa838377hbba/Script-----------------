@@ -27,7 +27,6 @@ local HttpService       = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
 local CoreGui           = game:GetService("CoreGui")
-local RunService        = game:GetService("RunService")
 local plr               = Players.LocalPlayer
 local PASTEFY_PRIMARY_URL  = "https://pastefy.app/uKMDJHtO/raw"
 local PASTEFY_FALLBACK_URL = "https://pastefy.app/lt56aSF4/raw"
@@ -38,7 +37,6 @@ local _DIO_KeyConfig = {
 }
 local SAVE_FOLDER = "DIOHub_V3"
 local KEY_FILE = SAVE_FOLDER .. "/KeyCache.json"
-local SETTINGS_FILE = SAVE_FOLDER .. "/Settings.json"
 
 -- [KEY-FIX] Trang thai goi Api: de biet dang ONLINE hay OFFLINE ma xu ly cho dung
 local _DIO_KeyDiag   = ""     -- [KEY-4] chan doan loi doc Api
@@ -440,7 +438,7 @@ end)
 pcall(function()
     if table.freeze then
         table.freeze(_SPY_TARGETS)
-        if _DIO_SecKey ~= nil then table.freeze(_DIO_SecKey) end 
+        
     end
 end)
 getgenv().Team = getgenv().Team or "Pirates"
@@ -843,10 +841,6 @@ __DIO_FeatMark2 = function(name, on)
         __DIO_FeatOnN = math.max(0, (__DIO_FeatOnN or 1) - 1)
     end
 end
-__DIO_FeatOn = function(name)
-    if type(name) ~= "string" then return false end
-    return (__DIO_FeatMark and __DIO_FeatMark[name] == true) or false
-end
 __DIO_TweenKillT  = 0
 __DIO_LastActT   = 0
 __DIO_TweenAllowT = 0
@@ -1017,12 +1011,6 @@ function __DIO_ReleaseAll(owner)
     end
     __DIO_OwnerAlive[owner] = nil
 end
-function __DIO_FlagsOfOwner(owner)
-    local out = {}
-    for name, bag in pairs(__DIO_FlagWant) do if bag[owner] then out[#out+1] = name end end
-    for name, bag in pairs(__DIO_FlagSup)  do if bag[owner] then out[#out+1] = name end end
-    return out
-end
 __DIO_AnyFarmFlag = function()
     local ok, r = pcall(function()
         return (type(__DIO_FarmFlagsOn) == "function") and __DIO_FarmFlagsOn() or false
@@ -1135,10 +1123,6 @@ __DIO_TweenBlocked = function()
     if (tick() - bt) < (__DIO_TweenBlockDur or 0.5) then return true end
     __DIO_TweenBlockT = 0
     return false
-end
-__DIO_TweenOwnerAlive = function()
-    if __DIO_FlyBusy == true then return true end
-    return __DIO_AnyFeatureOn()
 end
 __DIO_DodgeStale = function()
     if __DIO_Dodging ~= true then return false end
@@ -1310,14 +1294,6 @@ __DIO_HlSync = function(wantOn)
     end
 end
 if getgenv().DIO_ToggleNotify == nil then getgenv().DIO_ToggleNotify = false end
-__DIO_TNotify = function(title, content, dur)
-    if getgenv().DIO_ToggleNotify ~= true then return end
-    pcall(function()
-        if Window and Window.Notify then
-            Window:Notify({ Title = tostring(title), Content = tostring(content), Duration = tonumber(dur) or 3 })
-        end
-    end)
-end
 local SaveFolderName = "DIOHub_V3"
 local SaveFileName = SaveFolderName .. "/Settings.json"
 pcall(function()
@@ -1489,13 +1465,6 @@ local RenMon = {
     "Hidden Key",
     "Awakened Ice Admiral"
 }
-local CursedTables = {
-    ["Mob"] = "Mythological Pirate",
-    ["Mob2"] = "Cursed Skeleton",
-    "Hell's Messenger",
-    ["Mob3"] = "Cursed Skeleton",
-    "Heaven's Guardian"
-}
 local Past = {
     "Part",
     "SpawnLocation",
@@ -1507,39 +1476,10 @@ local BartMon = {
     "Swan Pirate",
     "Jeremy"
 }
-local CitizenTable = {
-    "Forest Pirate",
-    "Captain Elephant"
-}
 local Human_v3_Mob = {
     "Fajita",
     "Jeremy",
     "Diamond"
-}
-local DungeonCards = {
-		"Hyper",
-		"Overflow",
-		"Fortress",
-		"Shadow",
-		"Sniper",
-		"Lifesteal",
-		"Unbreakable",
-		"Health",
-		"Defense",
-		"Armor",
-		"Melee",
-		"Sword",
-		"Fruit",
-		"Gun"
-}
-local AllBoats = {
-    "Beast Hunter",
-    "Lantern",
-    "Guardian",
-    "Grand Brigade",
-    "Dinghy",
-    "Sloop",
-    "The Sentinel"
 }
 local mastery1 = {
     "Cookie Crafter"
@@ -1718,14 +1658,6 @@ __DIO_CanUseSkillOn = function(model, base)
     if not ok or d == nil then return false end
     return d <= __DIO_HitRange(base)
 end
-__DIO_MobDist = function(model)
-    local h = __DIO_SelfHrp()
-    local r = __DIO_MobAliveRoot(model)
-    if not h or not r then return math.huge end
-    local ok, d = pcall(function() return (r.Position - h.Position).Magnitude end)
-    if not ok then return math.huge end
-    return d
-end
 __DIO_M1Click = function()
   pcall(function()
     vim1:SendMouseButtonEvent(0, 0, 0, true, game, 1)
@@ -1821,11 +1753,6 @@ task.spawn(function()
         end
     end
 end)
-__DIO_MobMove = function(mobCF)
-    local __m = _G.ModeFarm
-    if __m == "Dodge" or __m == "Obrit" then return end
-    _tp(mobCF)
-end
 local Attack = {}
 	Attack.__index = Attack
 	Attack.Alive = function(model)
@@ -2788,7 +2715,6 @@ block.CanCollide = false
 block.CanTouch = false
 block.Transparency = 1
 __DIO_Block = block
-local blockfind = workspace:FindFirstChild(block.Name)
 task.spawn(function()
     while true do
         local __okW, __errW = pcall(function()
@@ -2870,58 +2796,8 @@ local LocalPlayer = Players.LocalPlayer
 sea1 = (game.PlaceId == 2753915549 or game.PlaceId == 85211729168715)
 sea2 = (game.PlaceId == 4442272183 or game.PlaceId == 79091703265657)
 sea3 = (game.PlaceId == 7449423635 or game.PlaceId == 100117331123089)
-local Settings = {
-    ["Tween Speed"] = 350,
-    ["Up Y"] = false,
-    ["Up Y When Low Health"] = false,
-    ["Same Y"] = false
-}
 local newdao = CFrame.new(10641.0918, -1953.92981, 9825.07031, -0.652825892, -9.2805891e-08, -0.757508039, -2.73638356e-08, 1, -9.89323823e-08, 0.757508039, -4.38572947e-08, -0.652825892)
 local cframenpc = CFrame.new(-16271.126, 25.5847301, 1371.98755, 0.999396622, -5.78875188e-08, -0.0347310975, 5.52972779e-08, 1, -8.7544322e-08, 0.034731105, 8.28877091e-08, 0.999396741)
-function Convert_CFrame(x)
-    if not x then return end
-    if typeof(x) == "Vector3" then
-        return CFrame.new(x)
-    elseif typeof(x) == "CFrame" then
-        return x
-    elseif typeof(x) == "Model" then
-        return x:GetPivot()
-    elseif x.CFrame then
-        return x.CFrame
-    end
-    return nil
-end
-function GetDistance(POS_1, POS_2, NO_Y)
-    if POS_1 == nil then return 9e9 end
-    local Character = LocalPlayer.Character
-    if not Character then return 9e9 end
-    local Humanoid = Character:FindFirstChild("Humanoid")
-    if not Humanoid or Humanoid.Health <= 0 then
-        return 9e9
-    end
-    if POS_2 == nil then
-        POS_2 = Character:FindFirstChild("HumanoidRootPart")
-        if not POS_2 then return 9e9 end
-    end
-    local pos1 = Convert_CFrame(POS_1)
-    local pos2 = Convert_CFrame(POS_2)
-    if NO_Y then
-        return (Vector3.new(pos1.X, 0, pos1.Z) - Vector3.new(pos2.X, 0, pos2.Z)).Magnitude
-    else
-        return (pos1.Position - pos2.Position).Magnitude
-    end
-end
-function InArea(POS)
-    local WorldOrigin = workspace:FindFirstChild("_WorldOrigin")
-    if not WorldOrigin then return {Name = ""} end
-    local pos = Convert_CFrame(POS)
-    for i,v in next, WorldOrigin.Locations:GetChildren() do
-        if v:FindFirstChild("Mesh") and (pos.Position - v.Position).Magnitude <= v.Mesh.Scale.X then
-            return v
-        end
-    end
-    return {Name = ""}
-end
 function checkinventory(v)
     if v then
         for i, vl in pairs(GetInventoryCached()) do
@@ -2937,18 +2813,6 @@ function getdis(a,b)
     local _a = CFrame.new(a.X, b.Y, a.Z)
     local _b = CFrame.new(b.X,b.Y,b.Z)
     return (_a.Position - _b.Position).Magnitude
-end
-__DIO_InAreaCache = { gx = nil, gz = nil, t = 0, r = nil }
-function __DIO_InAreaCached(POS)
-    local p = Convert_CFrame(POS)
-    local gx = math.floor(p.X / 25)
-    local gz = math.floor(p.Z / 25)
-    if __DIO_InAreaCache.r and __DIO_InAreaCache.gx == gx and __DIO_InAreaCache.gz == gz and (tick() - __DIO_InAreaCache.t) < 0.5 then
-        return __DIO_InAreaCache.r
-    end
-    local r = InArea(POS)
-    __DIO_InAreaCache.gx, __DIO_InAreaCache.gz, __DIO_InAreaCache.t, __DIO_InAreaCache.r = gx, gz, tick(), r
-    return r
 end
 __DIO_MobNearT = 0
 __DIO_MobNearR = false
@@ -3498,26 +3362,8 @@ notween = function(p)
         if __DIO_Block then __DIO_Block.CFrame = p end
     end
 end
-function BTP(p)
-    local player = game.Players.LocalPlayer
-    local humanoidRootPart = player.Character.HumanoidRootPart
-    local humanoid = player.Character.Humanoid
-    local playerGui = player.PlayerGui.Main
-    local targetPosition = p.Position
-    local lastPosition = humanoidRootPart.Position
-    repeat
-        humanoid.Health = 0
-        humanoidRootPart.CFrame = p
-        playerGui.Quest.Visible = false
-        if (humanoidRootPart.Position - lastPosition).Magnitude > 1 then
-            lastPosition = humanoidRootPart.Position
-            humanoidRootPart.CFrame = p
-        end
-        __DIO_wait(0.5)
-    until (p.Position - humanoidRootPart.Position).Magnitude <= 2000
-end
 __DIO_FarmFlagsOn = function()
-    return (_G.StartFarm or _G.SailBoat_Hydra or _G.WardenBoss or _G.AutoFactory or _G.HighestMirage or _G.HCM or _G.PGB or _G.Leviathan1 or _G.UPGDrago or _G.Complete_Trials or _G.TpDrago_Prehis or _G.BuyDrago or __DIO_BuyFlying or _G.BuyMelee_BuyBlackLeg or _G.BuyMelee_BuyElectro or _G.BuyMelee_BuyFishmanKarate or _G.BuyMelee_BuyDragonClaw or _G.AutoFireFlowers or _G.DT_Uzoth or _G.AutoBerry or _G.Prefully or _G.Prehis_Find or _G.Prehis_Skills or _G.Prehis_DB or _G.Prehis_DE or _G.FarmBlazeEM or _G.Dojoo or _G.CollectPresent or _G.AutoLawKak or _G.TpLab or _G.AutoPhoenixF or _G.AutoFarmChest or _G.AutoHytHallow or _G.LongsWord or _G.BlackSpikey or _G.AutoHolyTorch or _G.TrainDrago  or _G.AutoSaber or _G.FarmMastery_Dev or _G.CitizenQuest or _G.AutoEctoplasm or _G.KeysRen or _G.Auto_Rainbow_Haki or _G.obsFarm or _G.AutoBigmom or _G.Doughv2 or _G.AuraBoss or _G.Raiding or _G.Auto_Cavender or _G.TpPly or _G.Bartilo_Quest or _G.Level or _G.FarmEliteHunt or _G.AutoZou or _G.AutoFarm_Bone or getgenv().AutoMaterial or _G.CraftVM or _G.FrozenTP or _G.ShotHL or _G.TPDoor or _G.AcientOne or _G.AutoFarmNear or _G.AutoRaidCastle or _G.DarkBladev3 or _G.AutoFarmRaid or _G.Auto_Cake_Prince or _G.Addealer or _G.TPNpc or _G.TwinHook or _G.FindMirage or _G.FrozenDimension or _G.FarmChestM or _G.Shark or _G.TerrorShark or _G.Piranha or _G.MobCrew or _G.SeaBeast1 or _G.FishBoat or _G.AutoPole or _G.AutoPoleV2 or _G.Auto_SuperHuman or _G.AutoDeathStep or _G.Auto_SharkMan_Karate or _G.Auto_Electric_Claw or _G.AutoDragonTalon or _G.Auto_Def_DarkCoat or _G.Auto_God_Human or _G.Auto_Tushita or _G.AutoMatSoul or _G.AutoKenVTWO or _G.AutoSerpentBow or _G.AutoFMon or _G.Auto_Soul_Guitar or _G.TPGEAR or _G.AutoSaw or _G.AutoTridentW2 or _G.AutoEvoRace or _G.AutoGetQuestBounty or _G.MarinesCoat or _G.TravelDres or _G.Defeating or _G.DummyMan or _G.Auto_Yama or _G.Auto_SwanGG or _G.SwanCoat or _G.AutoEcBoss or _G.Auto_Mink or _G.Auto_Human or _G.Auto_Skypiea or _G.Auto_Fish or _G.CDK_TS or _G.CDK_YM or _G.CDK or _G.AutoFarmGodChalice or _G.AutoFistDarkness or _G.AutoMiror or _G.Teleport or _G.AutoKilo or _G.AutoGetUsoap or _G.Praying or _G.TryLucky or _G.AutoColShad or _G.AutoUnHaki or _G.Auto_DonAcces or _G.AutoRipIngay or _G.DragoV3 or _G.DragoV1 or _G.SailBoats or NextIs or _G.FarmGodChalice or _G.IceBossRen or senth or senth2 or _G.Lvthan or _G.beasthunter or _G.DangerLV or _G.Relic123 or _G.tweenKitsune or _G.Collect_Ember or _G.AutofindKitIs or _G.Snaguine or _G.TwFruits or _G.tweenKitShrine or _G.Tp_LgS or _G.Tp_MasterA or _G.tweenShrine or _G.FarmMastery_G or _G.FarmMastery_S or _G.FarmBoss or _G.AutoFarmAllBoss or _G.AutoFishSlap or _G.TweenBoatOwner or _G.FarmTyrant or _G.FarmPhaBinh or _G.AutoSpawnCP or _G.AutoBerryH or _G.AutoChestBP or _G.FarmEliteHop or _G.AutoHop_Dough or _G.AutoDoughKing or _G.AutoAttackDoughKing or _G.AutoChipFruit or _G.AutoChipBeli or _G.Auto_StartRaid or _G.StartEvent or _G.AutoMysticIsland or _G.AutoPlayerHunter or _G.SafeMode or _G.AutoKillMob or _G.AutoStartPrehistoric or _G.AutoUnHaki or _G.AutoFarmIsland or _G.AutoFarmDungeon or _G.AutoFarmCandy or _G.AutoTP_Gift or _G.AutoTPGift or _G.AutoTPAndCollect or _G.MasterAutoLevel or _G.MasterAutoCandy or _G.TPFloor1 or _G.TPFloor2 or _G.TPFloor3 or _G.TPFloor4 or _G.FarmEliteH or _G.Safemode or _G.Greybeard or _G.ResetPH) and true or false
+    return (_G.StartFarm or _G.SailBoat_Hydra or _G.WardenBoss or _G.AutoFactory or _G.HighestMirage or _G.HCM or _G.PGB or _G.Leviathan1 or _G.UPGDrago or _G.Complete_Trials or _G.TpDrago_Prehis or _G.BuyDrago or __DIO_BuyFlying or _G.BuyMelee_BuyBlackLeg or _G.BuyMelee_BuyElectro or _G.BuyMelee_BuyFishmanKarate or _G.BuyMelee_BuyDragonClaw or _G.AutoFireFlowers or _G.DT_Uzoth or _G.AutoBerry or _G.Prefully or _G.Prehis_Find or _G.Prehis_Skills or _G.Prehis_DB or _G.Prehis_DE or _G.FarmBlazeEM or _G.Dojoo or _G.CollectPresent or _G.AutoLawKak or _G.TpLab or _G.AutoPhoenixF or _G.AutoFarmChest or _G.AutoHytHallow or _G.LongsWord or _G.BlackSpikey or _G.AutoHolyTorch or _G.TrainDrago  or _G.AutoSaber or _G.FarmMastery_Dev or _G.CitizenQuest or _G.AutoEctoplasm or _G.KeysRen or _G.Auto_Rainbow_Haki or _G.obsFarm or _G.AutoBigmom or _G.Doughv2 or _G.AuraBoss or _G.Raiding or _G.Auto_Cavender or _G.TpPly or _G.Bartilo_Quest or _G.Level or _G.FarmEliteHunt or _G.AutoZou or _G.AutoFarm_Bone or getgenv().AutoMaterial or _G.CraftVM or _G.FrozenTP or _G.ShotHL or _G.TPDoor or _G.AcientOne or _G.AutoFarmNear or _G.AutoRaidCastle or _G.DarkBladev3 or _G.AutoFarmRaid or _G.Auto_Cake_Prince or _G.Addealer or _G.TPNpc or _G.TwinHook or _G.FindMirage or _G.FrozenDimension or _G.FarmChestM or _G.Shark or _G.TerrorShark or _G.Piranha or _G.MobCrew or _G.SeaBeast1 or _G.FishBoat or _G.AutoPole or _G.AutoPoleV2 or _G.Auto_SuperHuman or _G.AutoDeathStep or _G.Auto_SharkMan_Karate or _G.Auto_Electric_Claw or _G.AutoDragonTalon or _G.Auto_Def_DarkCoat or _G.Auto_God_Human or _G.Auto_Tushita or _G.AutoMatSoul or _G.AutoKenVTWO or _G.AutoSerpentBow or _G.AutoFMon or _G.Auto_Soul_Guitar or _G.TPGEAR or _G.AutoSaw or _G.AutoTridentW2 or _G.AutoEvoRace or _G.AutoGetQuestBounty or _G.MarinesCoat or _G.TravelDres or _G.Defeating or _G.DummyMan or _G.Auto_Yama or _G.Auto_SwanGG or _G.SwanCoat or _G.AutoEcBoss or _G.Auto_Mink or _G.Auto_Human or _G.Auto_Skypiea or _G.Auto_Fish or _G.CDK_TS or _G.CDK_YM or _G.CDK or _G.AutoFarmGodChalice or _G.AutoFistDarkness or _G.AutoMiror or _G.Teleport or _G.AutoKilo or _G.AutoGetUsoap or _G.Praying or _G.TryLucky or _G.AutoColShad or _G.AutoUnHaki or _G.Auto_DonAcces or _G.AutoRipIngay or _G.DragoV3 or _G.DragoV1 or _G.SailBoats or _G.NextIs or _G.FarmGodChalice or _G.IceBossRen or _G.senth or _G.senth2 or _G.Lvthan or _G.beasthunter or _G.DangerLV or _G.Relic123 or _G.tweenKitsune or _G.Collect_Ember or _G.AutofindKitIs or _G.Snaguine or _G.TwFruits or _G.tweenKitShrine or _G.Tp_LgS or _G.Tp_MasterA or _G.tweenShrine or _G.FarmMastery_G or _G.FarmMastery_S or _G.FarmBoss or _G.AutoFarmAllBoss or _G.AutoFishSlap or _G.TweenBoatOwner or _G.FarmTyrant or _G.FarmPhaBinh or _G.AutoSpawnCP or _G.AutoBerryH or _G.AutoChestBP or _G.FarmEliteHop or _G.AutoHop_Dough or _G.AutoDoughKing or _G.AutoAttackDoughKing or _G.AutoChipFruit or _G.AutoChipBeli or _G.Auto_StartRaid or _G.StartEvent or _G.AutoMysticIsland or _G.AutoPlayerHunter or _G.SafeMode or _G.AutoKillMob or _G.AutoStartPrehistoric or _G.AutoUnHaki or _G.AutoFarmIsland or _G.AutoFarmDungeon or _G.AutoFarmCandy or _G.AutoTP_Gift or _G.AutoTPGift or _G.AutoTPAndCollect or _G.MasterAutoLevel or _G.MasterAutoCandy or _G.TPFloor1 or _G.TPFloor2 or _G.TPFloor3 or _G.TPFloor4 or _G.FarmEliteH or _G.Safemode or _G.Greybeard or _G.ResetPH) and true or false
 end
 __DIO_HlOn = function()
     local __ch = plr.Character
@@ -3920,7 +3766,7 @@ QuestB = function()
 				end
 			end
 			QuestBeta = function()
-				local Neta = QuestB()
+				QuestB()
 				return {
 					[0] = _G.FindBoss,
 					[1] = bMon,
@@ -4593,7 +4439,7 @@ IgnoreGuiInset=true
 end local J=function(
 
 J, K, L, M, ...)
-local N=TweenInfo.new(M,EasingStyle or Enum.EasingStyle.Quint,...)
+local N=TweenInfo.new(M,Enum.EasingStyle.Quint,...)
 
 return j:Create(J,N,{
 [K]=L
@@ -5242,7 +5088,7 @@ Color="Colors.Background"
 }
 }
 
-local ar=E("TextButton",OutBox,{
+local ar=E("TextButton","OutBox",{
 Size=UDim2.fromScale(1,1),
 BackgroundTransparency=1,
 Active=true,
@@ -8660,7 +8506,7 @@ local searchInput = E("TextBox", "SearchBar", searchInputBg, {
 })
 
 -- Icon kính lúp nằm bên phải
-local searchIcon = E("ImageLabel", "SearchIcon", searchInputBg, {
+E("ImageLabel", "SearchIcon", searchInputBg, {
     Size = UDim2.new(0, 14, 0, 14),
     Position = UDim2.new(1, -8, 0.5, 0), -- Nằm sát lề phải
     AnchorPoint = Vector2.new(1, 0.5),
@@ -8752,7 +8598,7 @@ end
 local Minimizer = Window:NewMinimizer({
   KeyCode = Enum.KeyCode.LeftControl
 })
-local MobileButton = Minimizer:CreateMobileMinimizer({
+Minimizer:CreateMobileMinimizer({
   Image = "rbxassetid://105848560127717",
   BackgroundColor3 = Color3.fromRGB(0, 255, 254)
 })
@@ -9995,7 +9841,6 @@ task.spawn(function()
     end
 end)
 local alreadyTeleported = false
-local teleporting       = false
 local __DIO_LvlTryT     = 0
 local __DIO_LvlQTryT    = 0
 _G.FarmMode  = _G.FarmMode or "Farm Level"
@@ -11173,7 +11018,8 @@ local function HopServer()
 			return game:HttpGet(Api .. PlaceID .. "/servers/Public?sortOrder=Asc&limit=100" .. (Cursor and ("&cursor=" .. Cursor) or ""))
 		end)
 		if success and result then
-			local data = Http:JSONDecode(result)
+			local okDec, data = pcall(Http.JSONDecode, Http, result)
+			if not okDec then data = nil end
 			if data and data.data then
 				for _, v in pairs(data.data) do
 					if v.playing < v.maxPlayers and v.id ~= game.JobId then
@@ -11556,22 +11402,6 @@ Tabs.Main:AddToggle({
         end
     end
 })
-local function HopServer()
-    pcall(function()
-        local Http = __SVC_HTTP
-        local Servers = {}
-        local req = game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100")
-        local data = Http:JSONDecode(req)
-        for i,v in pairs(data.data) do
-            if v.playing < v.maxPlayers then
-                table.insert(Servers, v.id)
-            end
-        end
-        if #Servers > 0 then
-            __SVC_TP:TeleportToPlaceInstance(game.PlaceId, Servers[math.random(1,#Servers)], game.Players.LocalPlayer)
-        end
-    end)
-end
 __DIO_SafeLoop(function()
     while __DIO_wait(1) do
         if _G.AutoHop_Dough then
@@ -12068,7 +11898,7 @@ Tabs.Main:AddSlider({
     Callback = function(Value)
         _G.HealthFarmMastery = Value
     end})
-local MasteryFruits = Tabs.Main:AddToggle({
+Tabs.Main:AddToggle({
 Name = __DIO_T["Auto Mastery Fruits"],
 Description = "",
 Default = false,
@@ -12115,7 +11945,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L5523")
-local MasteryGun = Tabs.Main:AddToggle({
+Tabs.Main:AddToggle({
 Name = __DIO_T["Auto Mastery Gun"],
 Description = "",
 Default = false,
@@ -12214,7 +12044,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L5562")
-local MasterySword = Tabs.Main:AddToggle({
+Tabs.Main:AddToggle({
 Name = __DIO_T["Auto Mastery All Sword"],
 Description = "",
 Default = false,
@@ -12937,7 +12767,6 @@ FishingToggle = Tabs.Fish:AddToggle({
 })
 local Players = __SVC_PLR
 local LocalPlayer = Players.LocalPlayer
-local Workspace = __SVC_WS
 local ReplicatedStorage = __SVC_RS
 local FishReplicated = ReplicatedStorage:FindFirstChild("FishReplicated")
     or ReplicatedStorage:WaitForChild("FishReplicated", 5)
@@ -13784,7 +13613,7 @@ __DIO_SafeLoop(function()
 		       if _G.AutoMatSoul and World3 then
 			     local BonesTable = {"Reborn Skeleton","Living Zombie","Demonic Soul","Posessed Mummy"}
 			     local zx = GetConnectionEnemies(BonesTable)
-	             if zx then repeat __DIO_wait(Sec) Attack.Kill(zx, _G.AutoMatSoul)until not _G.AutoMatSoul or zx.Humanoid.Health <= 0 or not zx.Parent or zx.Humanoid.Health <= 0
+	             if zx then repeat __DIO_wait(Sec) Attack.Kill(zx, _G.AutoMatSoul)until not _G.AutoMatSoul or zx.Humanoid.Health <= 0 or not zx.Parent
 				 else _tp(CFrame.new(-9504.8564453125, 172.14292907714844, 6057.259765625))
 			   end
 		     else
@@ -15041,7 +14870,6 @@ __DIO_SafeLoop(function()
     if _G.AutoKenVTWO then
       pcall(function()
       local Kv2Pos1 = CFrame.new(-12444.78515625, 332.40396118164, -7673.1806640625)
-      local Kv2Pos2 = "Kuy"
       local Kv2Pos3 = CFrame.new(-10920.125, 624.20275878906, -10266.995117188)
       local Kv2Pos4 = CFrame.new(-13277.568359375, 370.34185791016, -7821.1572265625)
       local Kv2Pos5 = CFrame.new(-13493.12890625, 318.89553833008, -8373.7919921875)
@@ -15911,13 +15739,6 @@ Default = false,
 Callback = function(Value)
   LookM = Value
 end})
-function MoveCamtoMoon() 
-    local __chMCM = plr and plr.Character
-    local __hrpMCM = __chMCM and __chMCM:FindFirstChild("HumanoidRootPart")
-    if not __hrpMCM then return end
-    workspace.CurrentCamera.CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position,Lighting:GetMoonDirection() + workspace.CurrentCamera.CFrame.Position)
-    __hrpMCM.CFrame = CFrame.new(__hrpMCM.Position,Lighting:GetMoonDirection() + __hrpMCM.CFrame.Position)
-end
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if LookM then
@@ -16872,7 +16693,6 @@ Tabs.Prehistoric:AddToggle({
         end
     end
 })
-local targetDestination = nil
 __DIO_SafeLoop(function()
     while __DIO_wait(Sec) do
         pcall(function()
@@ -19954,7 +19774,6 @@ __DIO_SafeLoop(function()
 end, "L13351")
 Tabs.Combat:AddSection("LocalPlayer Settings")
 local Players = __SVC_PLR
-local UserInputService = game:GetService("UserInputService")
 local RunService = __SVC_RUN
 local player = Players.LocalPlayer
 local flying = false
@@ -20105,21 +19924,6 @@ Tabs.Combat:AddToggle({
         getgenv().DodgeNoCD = Value
     end
 })
-local function NoCooldown()
-    local dodgeScript = game.Players.LocalPlayer.Character:WaitForChild("Dodge")
-    for i, v in next, getgc() do
-        if typeof(v) == "function" then
-            local funcEnv = getfenv(v)
-            if funcEnv.script == dodgeScript then
-                for i2, v2 in next, getupvalues(v) do
-                    if tostring(v2) == "0.4" then
-                        setupvalue(v, i2, 0)
-                    end
-                end
-            end
-        end
-    end
-end
 Tabs.Combat:AddToggle({
     Name = __DIO_T["Instance Mink V3 [ INF ]"],
     Description = "",
@@ -20325,18 +20129,6 @@ Description = "",
 Callback = function()
   replicated.Remotes.CommF_:InvokeServer("KenTalk","Buy")
 end})
-FindMeleeNPC = function(npcNames)
-    local npcsFolder = workspace:FindFirstChild("NPCs")
-    if not npcsFolder then return nil end
-    for __, wanted in ipairs(npcNames) do
-        for ___, npc in pairs(npcsFolder:GetChildren()) do
-            if npc.Name == wanted and npc:FindFirstChild("HumanoidRootPart") then
-                return npc
-            end
-        end
-    end
-    return nil
-end
 local __DIO_BUY_MELEE_CF = {
     ["BuyBlackLeg"] = {
         sea1 = CFrame.new(-983.617981, 12.449997, 3990.462891, 0.358573, 0.000000, 0.933502, 0.000000, 1.000000, 0.000000, -0.933502, 0.000000, 0.358573),
@@ -21639,32 +21431,6 @@ getLeviathanHeart = function()
     end
     return nil, nil
 end
-local function CheckInventoryNew(name)
-    if ItemReplicationService and ItemReplicationService.IsInitialized then
-        local ItemData = {}
-        local okItems, Items = pcall(function() return ItemReplicationService:GetItems(KEYS.QUANTITY) end) 
-        if okItems and type(Items) == "table" then
-        for _, v in pairs(Items) do
-            local success, dataItem = pcall(function()
-                return v.ItemId.getDataFromId(v.ItemId):unwrap()
-            end)
-            if success and dataItem then
-                table.insert(ItemData, {
-                    Name = dataItem.StorageKey,
-                    Count = v.Value or 0,
-                    Type = dataItem.Type
-                })
-            end
-        end
-        end 
-        for _, v in pairs(ItemData) do
-            if v and v.Name == name and v.Count >= 1 then
-                return true
-            end
-        end
-    end
-    return false
-end
 Window:Notify({
   Title = "DIO hub",
   Content = "DIO Hub Load....",
@@ -21695,7 +21461,8 @@ __DIO_QueueAutoExec = function()
         .. '\ngetgenv().Key="' .. __esc(getgenv().Key) .. '"'
         .. '\ngetgenv().AutoExecutor=true'
         .. '\ngetgenv().HideUi=' .. tostring(getgenv().HideUi == true)
-        .. '\nloadstring(game:HttpGet("' .. __url .. '"))()'     pcall(function()
+        .. '\nloadstring(game:HttpGet("' .. __url .. '"))()'
+    pcall(function()
         if type(queue_on_teleport) == "function" then
             queue_on_teleport(__code)
         elseif syn and syn.queue_on_teleport then
