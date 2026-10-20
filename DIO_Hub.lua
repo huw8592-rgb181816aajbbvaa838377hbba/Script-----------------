@@ -1,5 +1,5 @@
-local pcall, type, tostring, tonumber, unpack = pcall, type, tostring, tonumber, unpack or table.unpack
-local rawget, rawset, setmetatable = rawget, rawset, setmetatable
+local pcall, xpcall, type, tostring, tonumber, select, unpack = pcall, xpcall, type, tostring, tonumber, select, unpack or table.unpack
+local rawget, rawset, rawequal, getmetatable, setmetatable = rawget, rawset, rawequal, getmetatable, setmetatable
 local string, table, math, task, coroutine, debug, os = string, table, math, task, coroutine, debug, os
 local game, Instance, Vector3, CFrame, UDim2, Color3 = game, Instance, Vector3, CFrame, UDim2, Color3
 local getgenv = getgenv or function() return _G end
@@ -16,10 +16,18 @@ pcall(function()
         if type(f) == "function" then _DIO_RawHttpGet = f end
     end
 end)
+local _DIO_RawHttpPost = game.HttpPost
+pcall(function()
+    if rawget then
+        local f = rawget(game, "HttpPost")
+        if type(f) == "function" then _DIO_RawHttpPost = f end
+    end
+end)
 local HttpService       = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
 local CoreGui           = game:GetService("CoreGui")
+local RunService        = game:GetService("RunService")
 local plr               = Players.LocalPlayer
 local PASTEFY_PRIMARY_URL  = "https://pastefy.app/uKMDJHtO/raw"
 local PASTEFY_FALLBACK_URL = "https://pastefy.app/lt56aSF4/raw"
@@ -30,27 +38,33 @@ local _DIO_KeyConfig = {
 }
 local SAVE_FOLDER = "DIOHub_V3"
 local KEY_FILE = SAVE_FOLDER .. "/KeyCache.json"
+local SETTINGS_FILE = SAVE_FOLDER .. "/Settings.json"
 
-local _DIO_KeyDiag   = ""
-local _DIO_ApiOnline = false
-local _DIO_ApiKeys   = {}
-local _DIO_ApiLink   = ""
+-- [KEY-FIX] Trang thai goi Api: de biet dang ONLINE hay OFFLINE ma xu ly cho dung
+local _DIO_KeyDiag   = ""     -- [KEY-4] chan doan loi doc Api
+local _DIO_ApiOnline = false  -- lan goi Api gan nhat co doc duoc khong
+local _DIO_ApiKeys   = {}     -- danh sach key hop le lay tu Api (da chuan hoa)
+local _DIO_ApiLink   = ""     -- Linkgetkey lay tu Api
+local _DIO_ApiRaw    = ""     -- noi dung tho Api tra ve (debug)
+-- [KEY-FIX] (tuy chon) Key dung khi may KHONG goi duoc Api. De trong = offline thi khong cho qua.
 local _DIO_OfflineKeys = {
+    -- "DIOHUB", -- <-- bo comment va dien key cua ban vao day neu may ban khong goi duoc Api
 }
 
 local function _DIO_CleanJSON(str)
     if type(str) ~= "string" then return "" end
-    str = str:gsub("\239\187\191", "")
-    str = str:gsub("\226\128\139", "")
-    str = str:gsub("\226\128\140", "")
-    str = str:gsub("\226\128\141", "")
-    str = str:gsub("%-%-[^\r\n]*", "")
-    str = str:gsub(",%s*}", "}")
-    str = str:gsub(",%s*]", "]")
+    str = str:gsub("\239\187\191", "")       -- BOM UTF-8 dau file
+    str = str:gsub("\226\128\139", "")       -- zero width space
+    str = str:gsub("\226\128\140", "")       -- zero width non-joiner
+    str = str:gsub("\226\128\141", "")       -- zero width joiner
+    str = str:gsub("%-%-[^\r\n]*", "")       -- comment kieu Lua
+    str = str:gsub(",%s*}", "}")             -- bo dau phay thua cuoi object
+    str = str:gsub(",%s*]", "]")             -- bo dau phay thua cuoi array
     str = str:gsub("^%s+", ""):gsub("%s+$", "")
     return str
 end
 
+-- [KEY-FIX] Chuan hoa key: bo ky tu vo hinh, \r \n \t, gop khoang trang
 local function _DIO_NormKey(s)
     if type(s) ~= "string" then return "" end
     local t = s
@@ -66,18 +80,21 @@ local function _DIO_NormKey(s)
     return t
 end
 
+-- [KEY-FIX] So sanh key KHONG phan biet hoa/thuong (ban cu so sanh tung byte -> 'diohub' bi tu choi)
 local function _DIO_KeyEq(a, b)
     local x, y = _DIO_NormKey(a), _DIO_NormKey(b)
     if #x == 0 or #y == 0 then return false end
     return x:lower() == y:lower()
 end
 
+-- [KEY-FIX] Them tham so chong cache: pastefy / executor co the cache URL /raw
 local function _DIO_Bust(url)
     if type(url) ~= "string" or #url == 0 then return url end
     local sep = url:find("?", 1, true) and "&" or "?"
     return url .. sep .. "t=" .. tostring(os.time()) .. "&r=" .. tostring(math.random(100000, 999999))
 end
 
+-- [KEY-FIX] Lay du lieu Api bang nhieu cach: game:HttpGet -> request/http_request -> HttpGetAsync
 local function _DIO_HttpGet(url)
     local out = nil
     pcall(function()
@@ -111,6 +128,7 @@ local function _DIO_TryPastefy(url, tag)
         _DIO_KeyDiag = tag .. ": HTTP that bai / khong tra text (404? mang? executor chan? Cloudflare?)"
         return nil
     end
+    _DIO_ApiRaw = raw
     local okJ, dec = pcall(function() return HttpService:JSONDecode(_DIO_CleanJSON(raw)) end)
     if (not okJ) or type(dec) ~= "table" then
         _DIO_KeyDiag = tag .. ": JSON khong hop le -> " .. tostring(dec):sub(1, 60) .. " | raw: " .. tostring(raw):sub(1, 60)
@@ -119,6 +137,7 @@ local function _DIO_TryPastefy(url, tag)
     return dec
 end
 
+-- [KEY-FIX] Key co the la: "Key" (string), "Keys"/"keys" (mang), "key", "key_list" -> gom het lai
 local function _DIO_KeyListFrom(data)
     local out = {}
     local function push(v)
@@ -198,6 +217,7 @@ local function _DIO_KeyLabel()
     return "(chua co - hay bam Check Key)"
 end
 
+-- ===== [KEY-FIX] Cache file key =====
 local function _DIO_ReadKeyCache()
     if not (isfile and readfile) then return nil end
     local ok, data = pcall(function()
@@ -212,7 +232,9 @@ local function _DIO_ClearKeyCache(reason)
         if delfile and isfile and isfile(KEY_FILE) then delfile(KEY_FILE) end
     end)
     _DIO_PendingKey = ""
+    if reason then warn("[DIO KEY] Xoa cache key cu: " .. tostring(reason)) end
 end
+-- [KEY-FIX] Api la nguon chan ly: key trong cache / getgenv() ma khong con tren Api thi phai bi xoa
 local function _DIO_InvalidateStaleCache()
     if not _DIO_ApiOnline then return end
     local function inApi(k)
@@ -231,6 +253,7 @@ local function _DIO_InvalidateStaleCache()
         if type(gk) == "string" and #gk > 0 and not inApi(gk) then
             getgenv().Key = ""
             _DIO_SessionKey = nil
+            warn("[DIO KEY] getgenv().Key cu (" .. tostring(gk):sub(1, 40) .. ") khong con hop le -> da xoa.")
         end
     end)
 end
@@ -244,6 +267,8 @@ local function _SEC_VerifyKey(inputKey)
     end
     local data = _DIO_ResolvePendingFromPastefy()
     if type(data) == "table" then
+        -- [KEY-2] ONLINE: Pastefy la nguon chan ly DUY NHAT -> doi key o pastefy co hieu luc ngay,
+        -- key cu (cache / getgenv) KHONG the tu vao.
         local list = _DIO_KeyListFrom(data)
         if #list == 0 then
             warn("[DIO KEY] Pastefy tra ve JSON hop le nhung thieu truong 'Key' hop le.")
@@ -251,30 +276,40 @@ local function _SEC_VerifyKey(inputKey)
         end
         for _, official in ipairs(list) do
             if _DIO_KeyEq(key, official) then
-                _DIO_SetKey(official)
+                _DIO_SetKey(official) -- luu dung chinh ta cua Api
+                print("[DIO KEY] Key hop le (khop voi Api).")
                 return true
             end
         end
+        -- [KEY-FIX] Chua thay key -> doc lai Api 1 lan voi URL moi (chong ban cache cu cua
+        -- executor / pastefy / Cloudflare lam script van doc phai key cu)
+        warn("[DIO KEY] Lan doc dau khong thay key nay -> doc lai Api (chong cache)...")
         local data2 = _DIO_ResolvePendingFromPastefy()
         if type(data2) == "table" then
             for _, official in ipairs(_DIO_KeyListFrom(data2)) do
                 if _DIO_KeyEq(key, official) then
                     _DIO_SetKey(official)
+                    print("[DIO KEY] Key hop le (khop voi Api sau khi doc lai).")
                     return true
                 end
             end
         end
+        -- [KEY-FIX] key nay khong con dung voi Api -> don cache / getgenv() cu di
         _DIO_InvalidateStaleCache()
         warn("[DIO KEY] Key vua nhap KHONG nam trong danh sach key cua Api hien tai.")
         return false
     end
+    -- OFFLINE (khong toi duoc Api): chap nhan key cau hinh / cache de khong khoa nguoi dung
     if #_DIO_PendingKey > 0 and _DIO_KeyEq(key, _DIO_PendingKey) then
         _DIO_SetKey(_DIO_PendingKey)
+        warn("[DIO KEY] OFFLINE: cho qua bang key cau hinh/cache cua may nay.")
         return true
     end
+    -- [KEY-FIX] OFFLINE: danh sach key du phong khai bao trong script (neu co)
     for _, k in ipairs(_DIO_OfflineKeys) do
         if _DIO_KeyEq(key, k) then
             _DIO_SetKey(_DIO_NormKey(k))
+            warn("[DIO KEY] OFFLINE: cho qua bang danh sach key du phong trong script.")
             return true
         end
     end
@@ -290,7 +325,7 @@ local function _DIO_AddCachedPendingKey()
         if not isfile(KEY_FILE) then return end
         local data = HttpService:JSONDecode(readfile(KEY_FILE))
         if type(data) == "table" and type(data.key) == "string" then
-            if data.time and (os.time() - tonumber(data.time) > 36000) then return end
+            if data.time and (os.time() - tonumber(data.time) > 36000) then return end -- [KEY-1]
             local k = _DIO_NormKey(data.key)
             if #k > 0 then
                 _DIO_PendingKey = k
@@ -304,12 +339,15 @@ local function _DIO_AddCachedPendingKey()
 end
 local function _DIO_AutoValidateConfiguredKey()
     if #_DIO_PendingKey == 0 then return false end
+    warn("[DIO KEY] Dang doi chieu key cau hinh san voi server (mat 1-3 giay)...")
     if _SEC_VerifyKey(_DIO_PendingKey) then
+        print("[DIO KEY] Key cau hinh san HOP LE -> tu dong vao hub, bo qua cua so nhap key.")
         return true
     end
     warn("[DIO KEY] Key cau hinh san KHONG khop voi key cua he thong -> se hien cua so nhap key. " .. _DIO_KeyDiag)
     return false
 end
+-- [KEY-FIX] Text chan doan de hien thi ngay trong cua so nhap key
 local function _DIO_KeyStatusText()
     local st = _DIO_ApiOnline and "ONLINE (doc duoc Api)" or "OFFLINE / LOI DOC API"
     local keys = (#_DIO_ApiKeys > 0) and table.concat(_DIO_ApiKeys, " | ") or "(chua doc duoc)"
@@ -333,11 +371,13 @@ pcall(function()
     ReplicatedStorage = _cloneref(game:GetService("ReplicatedStorage"))
     Players           = _cloneref(game:GetService("Players"))
     CoreGui           = _cloneref(game:GetService("CoreGui"))
+    RunService        = _cloneref(game:GetService("RunService"))
     plr               = Players.LocalPlayer
 end)
 if plr == nil then plr = Players.LocalPlayer end
 pcall(function()
     if clonefunction and game.HttpGet then _DIO_RawHttpGet = clonefunction(game.HttpGet) end
+    if clonefunction and game.HttpPost then _DIO_RawHttpPost = clonefunction(game.HttpPost) end
 end)
 pcall(function()
     local mt = getrawmetatable and getrawmetatable(game)
@@ -374,6 +414,7 @@ local function _SEC_CheckAndNeutralizeSpy(child)
         for spyName, _ in pairs(_SPY_TARGETS) do
             if name:find(spyName, 1, true) then
                 child:Destroy()
+                warn("[DIO SECURITY] Anti-Spy Neutralized tool: " .. tostring(child.Name))
                 return
             end
         end
@@ -428,7 +469,7 @@ pcall(function()
     local loading = mainGui and mainGui:FindFirstChild("Loading")
     if loading then
         local __loadCap = 0
-        repeat task.wait() __loadCap = __loadCap + 1 until (not loading.Visible) or __loadCap >= 90
+        repeat task.wait() __loadCap += 1 until (not loading.Visible) or __loadCap >= 90
     end
 end)
 AutoSelectTeam()
@@ -437,7 +478,7 @@ do
     while __waitN < 20 do
         if plr and plr:FindFirstChild("Data") and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then break end
         task.wait(1)
-        __waitN = __waitN + 1
+        __waitN += 1
     end
 end
 local function ensureFolder()
@@ -489,16 +530,20 @@ local function isKeyValid()
         saveKeyCache()
         return true
     end
+    -- [KEY-FIX] Neu doc duoc Api ma key cua may nay khong con hop le -> DON cache cu,
+    -- khong cho key cu "song" them 10 tieng nua (truoc day isKeyCacheValid() van cho vao).
     if _DIO_ApiOnline then
         _DIO_InvalidateStaleCache()
         warn("[DIO KEY] Api doc duoc nhung key cua may nay khong con hop le -> hien cua so nhap key.")
         return false
     end
     if isKeyCacheValid() then
+        warn("[DIO KEY] OFFLINE (khong goi duoc Api) -> tam cho qua bang cache con han 10h.")
         return true
     end
     return false
 end
+-- [KEY-FIX] Cho UI goi: xoa cache + key cu de nhap lai key moi
 local function _DIO_ResetKeyCache()
     _DIO_ClearKeyCache("nguoi dung bam Reset cache")
     pcall(function() getgenv().Key = "" end)
@@ -567,10 +612,10 @@ pcall(function()
     local frames = 0
     local __joinSecs = 0
     RunService.RenderStepped:Connect(function()
-        frames = frames + 1
+        frames += 1
         if tick() - lastTime >= 1 then
             local ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
-            __joinSecs = __joinSecs + 1
+            __joinSecs += 1
             local __h = math.floor(__joinSecs / 3600)
             local __m = math.floor((__joinSecs % 3600) / 60)
             local __sec = __joinSecs % 60
@@ -590,7 +635,7 @@ do
       local __hrpTries = 0
       while not Root and __hrpTries < 30 do
           task.wait(2)
-          __hrpTries = __hrpTries + 1
+          __hrpTries += 1
           if plr.Character then Root = plr.Character:FindFirstChild("HumanoidRootPart") end
       end
   end
@@ -639,7 +684,7 @@ __DIO_Wake = function(force)
 end
 __DIO_TweenActivateImmediate = function()
     local __nowA = tick()
-    if __nowA - (__DIO_LastActT or 0) < 0.5 then return end
+    if __nowA - (__DIO_LastActT or 0) < 0.5 then return end -- [HL4]
     __DIO_LastActT = __nowA
     __DIO_TweenBlockT = 0
     __DIO_TweenBlockDur = 0.5
@@ -701,19 +746,6 @@ __DIO_SafeLoop = function(fn, tag)
             __DIO_wait(0.5)
         end
     end)
-end
-__DIO_PcallLogLast = {}
-__DIO_PcallLog = function(tag, fn)
-    local __okPL, __errPL = pcall(fn)
-    if not __okPL then
-        local __msgPL = tostring(__errPL)
-        local __recPL = __DIO_PcallLogLast[tag]
-        if not __recPL or __recPL.msg ~= __msgPL or tick() - __recPL.t > 10 then
-            __DIO_PcallLogLast[tag] = { msg = __msgPL, t = tick() }
-            warn(("[DIO] %s error: %s"):format(tostring(tag), __msgPL))
-        end
-    end
-    return __okPL
 end
 __DIO_FlagWant    = {}
 __DIO_FlagSup     = {}
@@ -810,6 +842,10 @@ __DIO_FeatMark2 = function(name, on)
         __DIO_FeatMark[name] = nil
         __DIO_FeatOnN = math.max(0, (__DIO_FeatOnN or 1) - 1)
     end
+end
+__DIO_FeatOn = function(name)
+    if type(name) ~= "string" then return false end
+    return (__DIO_FeatMark and __DIO_FeatMark[name] == true) or false
 end
 __DIO_TweenKillT  = 0
 __DIO_LastActT   = 0
@@ -981,6 +1017,12 @@ function __DIO_ReleaseAll(owner)
     end
     __DIO_OwnerAlive[owner] = nil
 end
+function __DIO_FlagsOfOwner(owner)
+    local out = {}
+    for name, bag in pairs(__DIO_FlagWant) do if bag[owner] then out[#out+1] = name end end
+    for name, bag in pairs(__DIO_FlagSup)  do if bag[owner] then out[#out+1] = name end end
+    return out
+end
 __DIO_AnyFarmFlag = function()
     local ok, r = pcall(function()
         return (type(__DIO_FarmFlagsOn) == "function") and __DIO_FarmFlagsOn() or false
@@ -1094,6 +1136,10 @@ __DIO_TweenBlocked = function()
     __DIO_TweenBlockT = 0
     return false
 end
+__DIO_TweenOwnerAlive = function()
+    if __DIO_FlyBusy == true then return true end
+    return __DIO_AnyFeatureOn()
+end
 __DIO_DodgeStale = function()
     if __DIO_Dodging ~= true then return false end
     if (tick() - (__DIO_DodgeT0 or 0)) > (__DIO_DODGE_MAX or 8) then
@@ -1143,7 +1189,7 @@ __DIO_TweenSync = function()
         end
     end
     shouldTween = on and true or false
-    if on == false and type(__DIO_HlOff) == "function" then pcall(__DIO_HlOff) end
+    if on == false and type(__DIO_HlOff) == "function" then pcall(__DIO_HlOff) end -- [HL3]
     return on
 end
 __DIO_TweenDropHard = function(reason)
@@ -1249,7 +1295,7 @@ __DIO_SafeLoop(function()
         pcall(__DIO_Watchdog)
     end
 end, "V10Watchdog")
-__DIO_UserIntent = function()
+__DIO_UserIntent = function() -- [HL2v2] chi UI that cua phien nay moi duoc tinh
     return (__DIO_UIOnN or 0) > 0 or (__DIO_FeatOnN or 0) > 0
 end
 __DIO_HlSync = function(wantOn)
@@ -1281,7 +1327,8 @@ pcall(function()
 end)
 _G.SaveData = _G.SaveData or {}
 _G.DIO_AutoSave = (getgenv().SaveSettings ~= false)
-_G.DIO_AutoRestore = (getgenv().AutoRestoreToggles == true)
+_G.DIO_AutoRestore = (getgenv().AutoRestoreToggles == true) -- [HL1] mac dinh KHONG tu bat lai toggle da luu
+-- [HL5] xoa co _G/getgenv TRUE am tu phien cu (executor giu moi truong cu) -> het "chua bat gi ma tu chay/sang highlight"
 if getgenv().DIO_ResetStaleFlags ~= false then
     pcall(function()
         local __gSt = nil
@@ -1335,7 +1382,7 @@ if loading then
     local __loadCap2 = 0
     repeat
         __DIO_wait()
-        __loadCap2 = __loadCap2 + 1
+        __loadCap2 += 1
     until (not loading.Visible) or __loadCap2 >= 90 
 end
 World1 = game.PlaceId == 2753915549 or game.PlaceId == 85211729168715
@@ -1442,6 +1489,13 @@ local RenMon = {
     "Hidden Key",
     "Awakened Ice Admiral"
 }
+local CursedTables = {
+    ["Mob"] = "Mythological Pirate",
+    ["Mob2"] = "Cursed Skeleton",
+    "Hell's Messenger",
+    ["Mob3"] = "Cursed Skeleton",
+    "Heaven's Guardian"
+}
 local Past = {
     "Part",
     "SpawnLocation",
@@ -1453,10 +1507,39 @@ local BartMon = {
     "Swan Pirate",
     "Jeremy"
 }
+local CitizenTable = {
+    "Forest Pirate",
+    "Captain Elephant"
+}
 local Human_v3_Mob = {
     "Fajita",
     "Jeremy",
     "Diamond"
+}
+local DungeonCards = {
+		"Hyper",
+		"Overflow",
+		"Fortress",
+		"Shadow",
+		"Sniper",
+		"Lifesteal",
+		"Unbreakable",
+		"Health",
+		"Defense",
+		"Armor",
+		"Melee",
+		"Sword",
+		"Fruit",
+		"Gun"
+}
+local AllBoats = {
+    "Beast Hunter",
+    "Lantern",
+    "Guardian",
+    "Grand Brigade",
+    "Dinghy",
+    "Sloop",
+    "The Sentinel"
 }
 local mastery1 = {
     "Cookie Crafter"
@@ -1635,6 +1718,14 @@ __DIO_CanUseSkillOn = function(model, base)
     if not ok or d == nil then return false end
     return d <= __DIO_HitRange(base)
 end
+__DIO_MobDist = function(model)
+    local h = __DIO_SelfHrp()
+    local r = __DIO_MobAliveRoot(model)
+    if not h or not r then return math.huge end
+    local ok, d = pcall(function() return (r.Position - h.Position).Magnitude end)
+    if not ok then return math.huge end
+    return d
+end
 __DIO_M1Click = function()
   pcall(function()
     vim1:SendMouseButtonEvent(0, 0, 0, true, game, 1)
@@ -1730,6 +1821,11 @@ task.spawn(function()
         end
     end
 end)
+__DIO_MobMove = function(mobCF)
+    local __m = _G.ModeFarm
+    if __m == "Dodge" or __m == "Obrit" then return end
+    _tp(mobCF)
+end
 local Attack = {}
 	Attack.__index = Attack
 	Attack.Alive = function(model)
@@ -1741,6 +1837,16 @@ local Attack = {}
 	end
 	Attack.Pos = function(model, dist)
 		return (Root.Position - model.Position).Magnitude <= dist
+	end
+	Attack.Dist = function(model, dist)
+		local __rp = model and model:FindFirstChild("HumanoidRootPart")
+		if not __rp then return false end
+		return (Root.Position - __rp.Position).Magnitude <= dist
+	end
+	Attack.DistH = function(model, dist)
+		local __rp = model and model:FindFirstChild("HumanoidRootPart")
+		if not __rp then return false end
+		return (Root.Position - __rp.Position).Magnitude > dist
 	end
 	Attack.Kill = function(model, Succes)
 		if model and Succes then
@@ -1972,17 +2078,28 @@ IsRaidMob = function(mob)
     if ok then return result end
     return false
 end
+-- ================= MOB HOLD: giu mob dung im, danh khong bi vang =================
+-- [FIX-COMPILE] Boc khoi nay trong do...end: Luau gioi han 200 local/scope, main chunk
+-- cua script da gan cham gioi han -> them local o day se gay loi "Out of local registers"
+-- (script dieu ngay luc compile => UI khong len). do...end giai phong register sau khi ket thuc.
+do
+-- Loi cu: BringEnemy chi tween mob 1 lan (0.45s) roi "tha" => khong giu vi tri.
+--         Luc danh, knockback day velocity vao HumanoidRootPart => mob bi vang di,
+--         ma bring lai chi chay toi da 2.5s/lan nen mob bay mat.
+-- Moi:  mob duoc GIU lien tuc moi frame (neo CFrame vao anchor canh player +
+--       triet velocity = huy knockback). Chi tha khi: mob chet / tat Bring Mobs /
+--       farm dung (6s khong duoc cham) / mob qua xa / la mob Raid.
 local __DIO_BringRS = game:GetService("RunService")
-local __DIO_HeldMobs = {}
-local __DIO_HoldTouchDist = 80
-local __DIO_HoldReleaseT  = 6
-local __DIO_HoldMaxDist   = 600
-local __DIO_HoldGolden    = math.rad(137.508)
-local __DIO_HoldRadius    = 4
+local __DIO_HeldMobs = {}            -- [HumanoidRootPart] = data (mob dang duoc giu)
+local __DIO_HoldTouchDist = 80       -- BringEnemy "cham" giu cac mob trong khoang cach nay (tu player)
+local __DIO_HoldReleaseT  = 6        -- qua nhieu giay khong duoc cham (farm dung) => tha mob
+local __DIO_HoldMaxDist   = 600      -- mob cach player qua xa => tha
+local __DIO_HoldGolden    = math.rad(137.508)  -- goc vang: chia vi tri deu, khong de mob trung nhau
+local __DIO_HoldRadius    = 4        -- ban kinh vong tron quanh player de xep mob
 
 local function __DIO_CountHeld()
     local n = 0
-    for _ in pairs(__DIO_HeldMobs) do n = n + 1 end
+    for _ in pairs(__DIO_HeldMobs) do n += 1 end
     return n
 end
 
@@ -2022,6 +2139,7 @@ local function __DIO_ZeroVel(root)
     end
 end
 
+-- Loop giu mob: moi frame neo mob vao anchor + huy knockback cua don danh
 task.spawn(function()
     local __raidT = 0
     while true do
@@ -2051,13 +2169,16 @@ task.spawn(function()
                         __DIO_ReleaseHeld(root, data)
                         return
                     end
+                    -- Giu mob dung im tai cho
                     hum.WalkSpeed = 0
                     hum.JumpPower = 0
                     root.CanCollide = false
-                    __DIO_ZeroVel(root)
+                    __DIO_ZeroVel(root)  -- huy knockback => danh bao nhieu cung khong vang
+                    -- Failsafe: Tweening keo dai bat thuong (>2s) => bo de loop neo duoc
                     if root:GetAttribute("Tweening") and (nowT - (data.tweenT or 0)) > 2 then
                         root:SetAttribute("Tweening", nil)
                     end
+                    -- Neo mob vao anchor (chi sau khi tween bring ket thuc)
                     if not root:GetAttribute("Tweening") then
                         root.CFrame = data.anchor
                     end
@@ -2080,6 +2201,8 @@ BringEnemy = function(Mon)
     local enFolder = workspace:FindFirstChild("Enemies")
     if not enFolder then return end
 
+    -- "Cham" cac mob dang giu de chung khong bi tha khi farm con dang chay
+    -- (chay TRUOC check cooldown de luc nao cung giu duoc mob)
     local nowT = tick()
     for root, data in pairs(__DIO_HeldMobs) do
         if root.Parent and data.hum and data.hum.Parent and data.hum.Health > 0
@@ -2127,13 +2250,15 @@ BringEnemy = function(Mon)
             if dist <= _G.BringRange then
                 local held = __DIO_HeldMobs[root]
                 if held then
-                    held.lastTouch = nowT
+                    held.lastTouch = nowT  -- dang giu roi, chi can cham de giu tiep
                 elseif __DIO_CountHeld() < _G.MaxBringMobs and not root:GetAttribute("Tweening") then
                     local isRaid = false
                     if type(IsRaidMob) == "function" then
                         isRaid = IsRaidMob(mob)
                     end
                     if not isRaid then
+                        -- Anchor: xep quanh player, dung o do cao cua cum mob
+                        -- (neo 1 lan luc bring => player bay len farm khong keo mob bay theo)
                         local ang = __DIO_HoldGolden * (__DIO_CountHeld() + 1)
                         local anchorCF = CFrame.new(
                             baseP.X + math.cos(ang) * __DIO_HoldRadius,
@@ -2167,6 +2292,7 @@ BringEnemy = function(Mon)
         end
     end
 end
+end -- [FIX-COMPILE] ket thuc khoi do...end cua MOB HOLD
 Useskills = function(weapon, skill)
   if weapon == "Melee" then
     weaponSc("Melee")
@@ -2223,7 +2349,7 @@ Useskills = function(weapon, skill)
   end
 end
 __DIO_BOOT("Load Hub 55%")
-pcall(function()
+local __DIO_hookOk = pcall(function()
 local gg = getrawmetatable(game)
 local old = gg.__namecall
 setreadonly(gg, false)
@@ -2242,21 +2368,6 @@ gg.__namecall = newcclosure(function(...)
     end
   return old(...)
 end)
--- [DIO FIX] Tu kiem tra hook: neu __namecall lam hong game:Method() (vd Arceus X) thi go hook ra
-local __hookOk = pcall(function()
-  local p = game:GetService("Players")
-  local h = game:GetService("HttpService")
-  assert(game:IsLoaded() ~= nil)
-  assert(game:FindFirstChild("Workspace") ~= nil)
-  assert(workspace:FindFirstChild("Terrain") ~= nil)
-  assert(type(h:GenerateGUID(false)) == "string")
-  assert(p ~= nil)
-end)
-if not __hookOk then
-  pcall(function() gg.__namecall = old end)
-  pcall(function() getgenv().DIO_NamecallHookDisabled = true end)
-  pcall(function() warn("[DIO] __namecall hook gay loi tren executor nay -> da go hook (mat aim skill MousePos, cac tinh nang khac van chay)") end)
-end
 end)
 GetConnectionEnemies = function(a)
   for i,v in pairs(replicated:GetChildren()) do
@@ -2677,6 +2788,7 @@ block.CanCollide = false
 block.CanTouch = false
 block.Transparency = 1
 __DIO_Block = block
+local blockfind = workspace:FindFirstChild(block.Name)
 task.spawn(function()
     while true do
         local __okW, __errW = pcall(function()
@@ -2758,8 +2870,58 @@ local LocalPlayer = Players.LocalPlayer
 sea1 = (game.PlaceId == 2753915549 or game.PlaceId == 85211729168715)
 sea2 = (game.PlaceId == 4442272183 or game.PlaceId == 79091703265657)
 sea3 = (game.PlaceId == 7449423635 or game.PlaceId == 100117331123089)
+local Settings = {
+    ["Tween Speed"] = 350,
+    ["Up Y"] = false,
+    ["Up Y When Low Health"] = false,
+    ["Same Y"] = false
+}
 local newdao = CFrame.new(10641.0918, -1953.92981, 9825.07031, -0.652825892, -9.2805891e-08, -0.757508039, -2.73638356e-08, 1, -9.89323823e-08, 0.757508039, -4.38572947e-08, -0.652825892)
 local cframenpc = CFrame.new(-16271.126, 25.5847301, 1371.98755, 0.999396622, -5.78875188e-08, -0.0347310975, 5.52972779e-08, 1, -8.7544322e-08, 0.034731105, 8.28877091e-08, 0.999396741)
+function Convert_CFrame(x)
+    if not x then return end
+    if typeof(x) == "Vector3" then
+        return CFrame.new(x)
+    elseif typeof(x) == "CFrame" then
+        return x
+    elseif typeof(x) == "Model" then
+        return x:GetPivot()
+    elseif x.CFrame then
+        return x.CFrame
+    end
+    return nil
+end
+function GetDistance(POS_1, POS_2, NO_Y)
+    if POS_1 == nil then return 9e9 end
+    local Character = LocalPlayer.Character
+    if not Character then return 9e9 end
+    local Humanoid = Character:FindFirstChild("Humanoid")
+    if not Humanoid or Humanoid.Health <= 0 then
+        return 9e9
+    end
+    if POS_2 == nil then
+        POS_2 = Character:FindFirstChild("HumanoidRootPart")
+        if not POS_2 then return 9e9 end
+    end
+    local pos1 = Convert_CFrame(POS_1)
+    local pos2 = Convert_CFrame(POS_2)
+    if NO_Y then
+        return (Vector3.new(pos1.X, 0, pos1.Z) - Vector3.new(pos2.X, 0, pos2.Z)).Magnitude
+    else
+        return (pos1.Position - pos2.Position).Magnitude
+    end
+end
+function InArea(POS)
+    local WorldOrigin = workspace:FindFirstChild("_WorldOrigin")
+    if not WorldOrigin then return {Name = ""} end
+    local pos = Convert_CFrame(POS)
+    for i,v in next, WorldOrigin.Locations:GetChildren() do
+        if v:FindFirstChild("Mesh") and (pos.Position - v.Position).Magnitude <= v.Mesh.Scale.X then
+            return v
+        end
+    end
+    return {Name = ""}
+end
 function checkinventory(v)
     if v then
         for i, vl in pairs(GetInventoryCached()) do
@@ -2775,6 +2937,18 @@ function getdis(a,b)
     local _a = CFrame.new(a.X, b.Y, a.Z)
     local _b = CFrame.new(b.X,b.Y,b.Z)
     return (_a.Position - _b.Position).Magnitude
+end
+__DIO_InAreaCache = { gx = nil, gz = nil, t = 0, r = nil }
+function __DIO_InAreaCached(POS)
+    local p = Convert_CFrame(POS)
+    local gx = math.floor(p.X / 25)
+    local gz = math.floor(p.Z / 25)
+    if __DIO_InAreaCache.r and __DIO_InAreaCache.gx == gx and __DIO_InAreaCache.gz == gz and (tick() - __DIO_InAreaCache.t) < 0.5 then
+        return __DIO_InAreaCache.r
+    end
+    local r = InArea(POS)
+    __DIO_InAreaCache.gx, __DIO_InAreaCache.gz, __DIO_InAreaCache.t, __DIO_InAreaCache.r = gx, gz, tick(), r
+    return r
 end
 __DIO_MobNearT = 0
 __DIO_MobNearR = false
@@ -3170,16 +3344,7 @@ if not __DIO_SmoothCtl then
                 local arriveR = sitting and 4 or 2.5
                 local rot = target - target.Position
                 local __planeDist = sitting and Vector3.new(want.X - cur.X, 0, want.Z - cur.Z).Magnitude or dist
-                local __sitY = want.Y
-                if sitting then
-                    local __vCfg = getgenv().DIOBoatYSpeed
-                    if __vCfg ~= false and __vCfg ~= 0 then
-                        local __vMax = tonumber(__vCfg) or math.clamp(math.max(speed, 1) * 0.5, 40, 250)
-                        local __stepY = __vMax * math.min(tonumber(dt) or 0.016, 0.1)
-                        __sitY = cur.Y + math.clamp(want.Y - cur.Y, -__stepY, __stepY)
-                    end
-                end
-                if __planeDist <= arriveR and (not sitting or __sitY == want.Y) then
+                if __planeDist <= arriveR then
                     local __shift = want - cur
                     if sitting then
                         local seat0 = hum.SeatPart
@@ -3221,9 +3386,9 @@ if not __DIO_SmoothCtl then
                     local step = math.min(xzDist, math.max(speed, 1) * dt)
                     if xzDist > 0.05 then
                         local dirxz = xz / xzDist
-                        newPos = Vector3.new(cur.X + dirxz.X * step, __sitY, cur.Z + dirxz.Z * step)
+                        newPos = Vector3.new(cur.X + dirxz.X * step, want.Y, cur.Z + dirxz.Z * step)
                     else
-                        newPos = Vector3.new(cur.X, __sitY, cur.Z)
+                        newPos = Vector3.new(cur.X, want.Y, cur.Z)
                     end
                     local __bv = hrp:FindFirstChild("BodyClip")
                     if not __bv then
@@ -3332,6 +3497,24 @@ notween = function(p)
         __DIO_TweenSet(p)
         if __DIO_Block then __DIO_Block.CFrame = p end
     end
+end
+function BTP(p)
+    local player = game.Players.LocalPlayer
+    local humanoidRootPart = player.Character.HumanoidRootPart
+    local humanoid = player.Character.Humanoid
+    local playerGui = player.PlayerGui.Main
+    local targetPosition = p.Position
+    local lastPosition = humanoidRootPart.Position
+    repeat
+        humanoid.Health = 0
+        humanoidRootPart.CFrame = p
+        playerGui.Quest.Visible = false
+        if (humanoidRootPart.Position - lastPosition).Magnitude > 1 then
+            lastPosition = humanoidRootPart.Position
+            humanoidRootPart.CFrame = p
+        end
+        __DIO_wait(0.5)
+    until (p.Position - humanoidRootPart.Position).Magnitude <= 2000
 end
 __DIO_FarmFlagsOn = function()
     return (_G.StartFarm or _G.SailBoat_Hydra or _G.WardenBoss or _G.AutoFactory or _G.HighestMirage or _G.HCM or _G.PGB or _G.Leviathan1 or _G.UPGDrago or _G.Complete_Trials or _G.TpDrago_Prehis or _G.BuyDrago or __DIO_BuyFlying or _G.BuyMelee_BuyBlackLeg or _G.BuyMelee_BuyElectro or _G.BuyMelee_BuyFishmanKarate or _G.BuyMelee_BuyDragonClaw or _G.AutoFireFlowers or _G.DT_Uzoth or _G.AutoBerry or _G.Prefully or _G.Prehis_Find or _G.Prehis_Skills or _G.Prehis_DB or _G.Prehis_DE or _G.FarmBlazeEM or _G.Dojoo or _G.CollectPresent or _G.AutoLawKak or _G.TpLab or _G.AutoPhoenixF or _G.AutoFarmChest or _G.AutoHytHallow or _G.LongsWord or _G.BlackSpikey or _G.AutoHolyTorch or _G.TrainDrago  or _G.AutoSaber or _G.FarmMastery_Dev or _G.CitizenQuest or _G.AutoEctoplasm or _G.KeysRen or _G.Auto_Rainbow_Haki or _G.obsFarm or _G.AutoBigmom or _G.Doughv2 or _G.AuraBoss or _G.Raiding or _G.Auto_Cavender or _G.TpPly or _G.Bartilo_Quest or _G.Level or _G.FarmEliteHunt or _G.AutoZou or _G.AutoFarm_Bone or getgenv().AutoMaterial or _G.CraftVM or _G.FrozenTP or _G.ShotHL or _G.TPDoor or _G.AcientOne or _G.AutoFarmNear or _G.AutoRaidCastle or _G.DarkBladev3 or _G.AutoFarmRaid or _G.Auto_Cake_Prince or _G.Addealer or _G.TPNpc or _G.TwinHook or _G.FindMirage or _G.FrozenDimension or _G.FarmChestM or _G.Shark or _G.TerrorShark or _G.Piranha or _G.MobCrew or _G.SeaBeast1 or _G.FishBoat or _G.AutoPole or _G.AutoPoleV2 or _G.Auto_SuperHuman or _G.AutoDeathStep or _G.Auto_SharkMan_Karate or _G.Auto_Electric_Claw or _G.AutoDragonTalon or _G.Auto_Def_DarkCoat or _G.Auto_God_Human or _G.Auto_Tushita or _G.AutoMatSoul or _G.AutoKenVTWO or _G.AutoSerpentBow or _G.AutoFMon or _G.Auto_Soul_Guitar or _G.TPGEAR or _G.AutoSaw or _G.AutoTridentW2 or _G.AutoEvoRace or _G.AutoGetQuestBounty or _G.MarinesCoat or _G.TravelDres or _G.Defeating or _G.DummyMan or _G.Auto_Yama or _G.Auto_SwanGG or _G.SwanCoat or _G.AutoEcBoss or _G.Auto_Mink or _G.Auto_Human or _G.Auto_Skypiea or _G.Auto_Fish or _G.CDK_TS or _G.CDK_YM or _G.CDK or _G.AutoFarmGodChalice or _G.AutoFistDarkness or _G.AutoMiror or _G.Teleport or _G.AutoKilo or _G.AutoGetUsoap or _G.Praying or _G.TryLucky or _G.AutoColShad or _G.AutoUnHaki or _G.Auto_DonAcces or _G.AutoRipIngay or _G.DragoV3 or _G.DragoV1 or _G.SailBoats or NextIs or _G.FarmGodChalice or _G.IceBossRen or senth or senth2 or _G.Lvthan or _G.beasthunter or _G.DangerLV or _G.Relic123 or _G.tweenKitsune or _G.Collect_Ember or _G.AutofindKitIs or _G.Snaguine or _G.TwFruits or _G.tweenKitShrine or _G.Tp_LgS or _G.Tp_MasterA or _G.tweenShrine or _G.FarmMastery_G or _G.FarmMastery_S or _G.FarmBoss or _G.AutoFarmAllBoss or _G.AutoFishSlap or _G.TweenBoatOwner or _G.FarmTyrant or _G.FarmPhaBinh or _G.AutoSpawnCP or _G.AutoBerryH or _G.AutoChestBP or _G.FarmEliteHop or _G.AutoHop_Dough or _G.AutoDoughKing or _G.AutoAttackDoughKing or _G.AutoChipFruit or _G.AutoChipBeli or _G.Auto_StartRaid or _G.StartEvent or _G.AutoMysticIsland or _G.AutoPlayerHunter or _G.SafeMode or _G.AutoKillMob or _G.AutoStartPrehistoric or _G.AutoUnHaki or _G.AutoFarmIsland or _G.AutoFarmDungeon or _G.AutoFarmCandy or _G.AutoTP_Gift or _G.AutoTPGift or _G.AutoTPAndCollect or _G.MasterAutoLevel or _G.MasterAutoCandy or _G.TPFloor1 or _G.TPFloor2 or _G.TPFloor3 or _G.TPFloor4 or _G.FarmEliteH or _G.Safemode or _G.Greybeard or _G.ResetPH) and true or false
@@ -3491,7 +3674,6 @@ __DIO_BoatAssist = function()
     return "goSeat"
 end
 spawn(function()
-  local __lastErrST = nil
   while true do
     local __okST, __errST = pcall(function()
       while __DIO_wait(0.1) do
@@ -3508,7 +3690,7 @@ spawn(function()
           end
       end
       pcall(__DIO_TweenSync)
-      local __hlWant = (__DIO_UserIntent() or __DIO_FlyBusy == true) and (tick() - (__DIO_BootT0 or 0)) > 5
+      local __hlWant = (__DIO_UserIntent() or __DIO_FlyBusy == true) and (tick() - (__DIO_BootT0 or 0)) > 5 -- [HL2v2]
       __DIO_HlSync(__hlWant)
       if __hlWant then
         local __stompHum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
@@ -3532,10 +3714,6 @@ spawn(function()
     end)
       end
     end)
-    if not __okST and tostring(__errST) ~= __lastErrST then
-      __lastErrST = tostring(__errST)
-      warn("[DIO] loop error: " .. __lastErrST)
-    end
 task.wait(0.5) 
   end
 end)
@@ -3742,7 +3920,7 @@ QuestB = function()
 				end
 			end
 			QuestBeta = function()
-				QuestB()
+				local Neta = QuestB()
 				return {
 					[0] = _G.FindBoss,
 					[1] = bMon,
@@ -3851,80 +4029,4686 @@ QuestNeta = function()
 end
 __DIO_BOOT("Load Hub 80%")
 local redzlib, __DIO_libErr
-local __DIO_LIB_URLS = {
-    "https://raw.githubusercontent.com/huw8592-rgb181816aajbbvaa838377hbba/Script-----------------/refs/heads/main/Library-Redz-Pulic-Source.lua",
-    "https://raw.githubusercontent.com/tlredz/Library/refs/heads/main/redz-V5-remake/main.luau",
-    -- Mirror jsDelivr (khac host): dung khi raw.githubusercontent.com bi nha mang/DNS chan
-    "https://cdn.jsdelivr.net/gh/huw8592-rgb181816aajbbvaa838377hbba/Script-----------------@main/Library-Redz-Pulic-Source.lua",
-    "https://cdn.jsdelivr.net/gh/tlredz/Library@main/redz-V5-remake/main.luau"
+-- [EMBED-LIB] redzlib duoc nhung THANG vao file => UI khong can tai library tu GitHub nua.
+-- (Fix loi "UI khong len" khi mang/ISP chan raw.githubusercontent.com hoac jsdelivr)
+do
+    local __okEmb, __resEmb = pcall(function()
+        return (function()
+-- ===== BEGIN EMBEDDED REDZ LIBRARY V5 =====
+--[[
+    REDZ LIBRARY V5 — Reskin UI (giống DIO Loader)
+    Chỉ sửa phần UI + Search: nền phẳng, tab nằm ngang dưới header,
+    viền/nhấn màu xanh lá, ô search nằm trong thanh tab.
+    Toggle / Slider / Dropdown / Keybind và toàn bộ logic chức năng giữ nguyên 100%.
+]]
+
+local a=cloneref or(function(...)return...end)
+
+local b=delfolder or deletefolder
+local c=delfile or deletefile
+local d=makefolder
+local e=writefile
+local f=readfile
+
+local g=setmetatable({},{
+__index=function(g,h)
+rawset(g,h,a(game:GetService(h)))
+return rawget(g,h)
+end
+})
+
+local h=g.MarketplaceService
+local i=g.UserInputService
+local j=g.TweenService
+local k=g.HttpService
+local l=g.RunService
+local m=g.Players
+
+local n=l.Heartbeat
+
+local o=m.LocalPlayer
+local p=o:GetMouse()
+
+local q=(gethui or function()return g.CoreGui end)()
+
+local r={
+Darker={
+Colors={
+Background=ColorSequence.new{
+ColorSequenceKeypoint.new(0.00,Color3.fromRGB(17,18,17)),
+ColorSequenceKeypoint.new(0.50,Color3.fromRGB(17,18,17)),
+ColorSequenceKeypoint.new(1.00,Color3.fromRGB(17,18,17))
+},
+Primary=Color3.fromRGB(80,200,90),
+OnPrimary=Color3.fromRGB(35,110,50),
+ScrollBar=Color3.fromRGB(30,130,55),
+Stroke=Color3.fromRGB(45,45,45),
+
+Error=Color3.fromRGB(255,102,102),
+Icons=Color3.fromRGB(232,233,235),
+
+JoinButton=Color3.fromRGB(37,128,69),
+Link=Color3.fromRGB(40,150,255),
+
+Dialog={
+Background=Color3.fromRGB(28,28,28)
+},
+Buttons={
+Holding=Color3.fromRGB(34,34,34),
+Default=Color3.fromRGB(28,28,30)
+},
+Border={
+Holding=Color3.fromRGB(60,60,60),
+Default=Color3.fromRGB(38,38,38),
+Green=Color3.fromRGB(80,200,90),
+GreenDim=Color3.fromRGB(35,110,50),
+},
+Text={
+Default=Color3.fromRGB(255,255,255),
+Dark=Color3.fromRGB(200,200,200),
+Darker=Color3.fromRGB(175,175,175),
+},
+Slider={
+SliderBar=Color3.fromRGB(30,130,55),
+SliderNumber=Color3.fromRGB(232,233,235),
+},
+Dropdown={
+Holder=Color3.fromRGB(30,30,30),
+}
+},
+Glass={
+-- ===== Bảng màu LIQUID GLASS XANH LÁ =====
+Base=Color3.fromRGB(9,44,31),
+Deep=Color3.fromRGB(5,28,20),
+Tint=Color3.fromRGB(18,92,60),
+Bright=Color3.fromRGB(52,226,126),
+Neon=Color3.fromRGB(126,255,182),
+Edge=Color3.fromRGB(206,255,228),
+White=Color3.fromRGB(255,255,255),
+Text=Color3.fromRGB(238,255,246),
+TextDim=Color3.fromRGB(178,238,206),
+Card=Color3.fromRGB(16,78,52),
+CardHover=Color3.fromRGB(26,116,76),
+Tab=Color3.fromRGB(56,224,126),
+Scrim=Color3.fromRGB(4,26,18),
+-- Nền kính (Window / Dialog / Notification)
+Window=ColorSequence.new{
+ColorSequenceKeypoint.new(0.00,Color3.fromRGB(28,132,86)),
+ColorSequenceKeypoint.new(0.32,Color3.fromRGB(12,68,46)),
+ColorSequenceKeypoint.new(0.66,Color3.fromRGB(7,40,29)),
+ColorSequenceKeypoint.new(1.00,Color3.fromRGB(20,110,72))
+},
+Panel=ColorSequence.new{
+ColorSequenceKeypoint.new(0.00,Color3.fromRGB(24,116,76)),
+ColorSequenceKeypoint.new(0.55,Color3.fromRGB(9,52,36)),
+ColorSequenceKeypoint.new(1.00,Color3.fromRGB(14,84,56))
+},
+-- Lớp bóng (sheen) + vệt sáng
+Sheen=ColorSequence.new{
+ColorSequenceKeypoint.new(0.00,Color3.fromRGB(255,255,255)),
+ColorSequenceKeypoint.new(0.50,Color3.fromRGB(214,255,232)),
+ColorSequenceKeypoint.new(1.00,Color3.fromRGB(180,255,214))
+},
+SheenTransparency=NumberSequence.new{
+NumberSequenceKeypoint.new(0.00,0.930),
+NumberSequenceKeypoint.new(0.26,0.965),
+NumberSequenceKeypoint.new(0.42,0.855),
+NumberSequenceKeypoint.new(0.58,0.930),
+NumberSequenceKeypoint.new(0.78,0.975),
+NumberSequenceKeypoint.new(1.00,0.940)
+},
+-- Bóng cho card (option)
+CardSheen=ColorSequence.new{
+ColorSequenceKeypoint.new(0.00,Color3.fromRGB(255,255,255)),
+ColorSequenceKeypoint.new(1.00,Color3.fromRGB(198,255,222))
+},
+CardSheenTransparency=NumberSequence.new{
+NumberSequenceKeypoint.new(0.00,0.900),
+NumberSequenceKeypoint.new(0.55,0.955),
+NumberSequenceKeypoint.new(1.00,0.995)
+},
+-- Bóng cho tab
+TabSheen=ColorSequence.new{
+ColorSequenceKeypoint.new(0.00,Color3.fromRGB(255,255,255)),
+ColorSequenceKeypoint.new(0.45,Color3.fromRGB(206,255,228)),
+ColorSequenceKeypoint.new(1.00,Color3.fromRGB(150,244,196))
+},
+-- Vạch sáng (gạch chân tab, đường kẻ phân cách)
+LineGradient=ColorSequence.new{
+ColorSequenceKeypoint.new(0.00,Color3.fromRGB(150,255,200)),
+ColorSequenceKeypoint.new(0.50,Color3.fromRGB(250,255,252)),
+ColorSequenceKeypoint.new(1.00,Color3.fromRGB(150,255,200))
+},
+LineTransparency=NumberSequence.new{
+NumberSequenceKeypoint.new(0.00,0.550),
+NumberSequenceKeypoint.new(0.50,0.050),
+NumberSequenceKeypoint.new(1.00,0.550)
+}
+},
+Icons={
+Error="rbxassetid://10709752996",
+Button="rbxassetid://10709791437",
+Close="rbxassetid://10747384394",
+TextBox="rbxassetid://15637081879",
+Search="rbxassetid://10734943674",
+Keybind="rbxassetid://10734982144",
+Dropdown={
+Open="rbxassetid://10709791523",
+Close="rbxassetid://10709790948"
+}
+},
+Font={
+Normal=Enum.Font.BuilderSans,
+Medium=Enum.Font.BuilderSansMedium,
+Bold=Enum.Font.BuilderSansBold,
+ExtraBold=Enum.Font.BuilderSansExtraBold,
+SliderValue=Enum.Font.FredokaOne
+},
+BackgroundTransparency=0.03
+}
 }
 
-local function __DIO_RobustGet(url, log)
-    if url:find("raw.githubusercontent.com", 1, true) then
-        local sep = url:find("?", 1, true) and "&" or "?"
-        url = url .. sep .. "t=" .. tostring(os.time()) .. "&r=" .. tostring(math.random(100000, 999999))
-    end
-    local function attempt(name, fn)
-        local ok, res = pcall(fn)
-        if ok and type(res) == "string" and #res > 100 then return res end
-        if ok then
-            log[#log + 1] = name .. ": rong/ngan (" .. type(res) .. (type(res) == "string" and (" " .. #res .. "b") or "") .. ")"
-        else
-            log[#log + 1] = name .. ": " .. tostring(res)
-        end
-        return nil
-    end
-    local out = attempt("HttpGet", function() return game:HttpGet(url, true) end)
-    if out then return out end
-    out = attempt("HttpGet2", function() return game:HttpGet(url) end)
-    if out then return out end
-    out = attempt("RawHttpGet", function() return _DIO_RawHttpGet(game, url, true) end)
-    if out then return out end
-    out = attempt("request", function()
-        local reqFn = (syn and syn.request) or (http and http.request) or http_request or request
-        assert(type(reqFn) == "function", "executor khong co request")
-        local res = reqFn({ Url = url, Method = "GET" })
-        assert(type(res) == "table", "request khong tra ve table")
-        local code = res.StatusCode or res.status_code
-        if code and code ~= 200 then error("HTTP " .. tostring(code)) end
-        return res.Body or res.body
-    end)
-    if out then return out end
-    out = attempt("HttpGetAsync", function() return game:HttpGetAsync(url) end)
-    return out
+for s,t in r do
+t.Name=s
+table.freeze(t)
 end
-local __DIO_libErrs, __DIO_libDownloaded = {}, false
-for _, __DIO_libURL in ipairs(__DIO_LIB_URLS) do
-    local __host = tostring(__DIO_libURL:match("https?://([^/]+)"))
-    local __log = {}
-    local __src = __DIO_RobustGet(__DIO_libURL, __log)
-    local __why
-    if type(__src) ~= "string" then
-        __why = "tai that bai -> " .. table.concat(__log, " | ")
-    else
-        __DIO_libDownloaded = true
-        local __okc, __fn, __cerr = pcall(loadstring, __src)
-        if not __okc then
-            __why = "loadstring crash: " .. tostring(__fn)
-        elseif type(__fn) ~= "function" then
-            __why = "loadstring loi: " .. tostring(__cerr)
-        else
-            local __okr, __res = pcall(__fn)
-            if __okr and __res ~= nil then
-                redzlib = __res
-                break
+
+local s={
+Information={
+Version="v2.0.1",
+GitHubOwner="tlredz"
+},
+Default={
+Theme="Darker",
+UISize=UDim2.fromOffset(550,380),
+SidebarWidth=160
+},
+
+Themes=r,
+
+Connections={},
+Options={},
+Tabs={}
+} 
+
+s.Info=s.Information
+s.Save=s.Default
+
+local t=workspace.CurrentCamera.ViewportSize local u=function(
+
+u, v, w)
+table.insert(s.Connections,u[w or"Connect"](u,v))end
+
+
+local v={}
+v.__index=v local w=function(
+
+w, x)
+for y in x:gmatch"[^%.]+"do
+w=w[y]
+end
+
+return w end local x=function(
+
+
+x, y, z, A)
+if not A then
+A=s.CurrentTheme
+end
+
+x[y]=w(A,if type(z)=="function"then z()else z)end local y=function(
+
+
+y, z, A)
+for B,C in A do
+x(z,B,C,y)
+end end local z=function(
+
+
+z, A)
+if d then
+local B=z:split"/"
+B[#B]=nil
+
+local C=table.concat(B,"/")
+
+if C~=""and(isfolder==nil or not isfolder(C))then
+d(C)
+end
+end
+
+e(z,A)end
+
+
+local A=false
+
+local B={
+MAX_SCALE=1.6,
+MIN_SCALE=0.6,
+
+TEXTBOX={
+PLACEHOLDER_TEXT="Input"
+}
+}
+
+function v:add(C,D)
+self.Descendants[D]=C
+
+if self.IS_RENDERING then
+y(s.CurrentTheme,C,D)
+end
+end
+
+function v:update()
+if self.IS_RENDERING and not self.UPDATED_OBJECTS then
+local C=s.CurrentTheme
+self.UPDATED_OBJECTS=true
+
+for D,E in self.Descendants do
+local F=typeof(E)
+if F=="table"then E:update()continue end
+
+y(C,E,D)
+end
+end
+end
+
+function v:destroy()
+local C=self.Parent and table.find(self.Parent.Descendants,  self) 
+
+if C then
+table.remove(self.Parent.Descendants,C)
+end
+
+table.clear(self.Descendants)
+setmetatable(self,nil)
+end
+
+function v:changeRendering(C)
+if self.IS_RENDERING~=C then
+self.IS_RENDERING=C
+self.UPDATED_OBJECTS=false
+end
+end
+
+function v:new()
+local C=setmetatable({
+IS_RENDERING=true,
+UPDATED_OBJECTS=false,
+Descendants={},
+Parent=self.Descendants~=nil and self or nil
+},v)
+
+if self.Descendants then
+table.insert(self.Descendants,C)
+end
+
+return C
+end
+
+local C=v:new()
+
+local D,E={}do
+local F={}
+
+local G={}do
+G.ElementsTable={
+Corner=function(H)
+return E("UICorner",{
+CornerRadius=H or UDim.new(0,8)
+})
+end,
+Stroke=function(H,I)
+return E("UIStroke",{
+Color=H or Color3.fromRGB(60,60,60),
+Thickness=I or 1
+})
+end,
+Image=function(H)
+return E("ImageLabel",{
+Image=H or"",
+BackgroundTransparency=1,
+Size=UDim2.fromScale(1,1)
+})
+end,
+Button=function()
+return E("TextButton",{
+Text="",
+Size=UDim2.fromScale(1,1),
+AutoButtonColor=false
+})
+end,
+Padding=function(H,I,J,K)
+return E("UIPadding",{
+PaddingLeft=H or UDim.new(0,10),
+PaddingRight=I or UDim.new(0,10),
+PaddingTop=J or UDim.new(0,10),
+PaddingBottom=K or UDim.new(0,10)
+})
+end,
+ListLayout=function(H)
+return E("UIListLayout",{
+Padding=H or UDim.new(0,5)
+})
+end,
+Text=function(H)
+return E("TextLabel",{
+BackgroundTransparency=1,
+Text=H or""
+})
+end,
+Gradient=function(H)
+return E("UIGradient",{
+Color=H
+})
+end
+}
+
+function G:Create(H,I,...)
+local J=self.ElementsTable[I]
+
+if J then
+local K=J(...)
+K.Parent=H
+return K
+end
+end
+end
+
+local H={}
+
+function H:Childs(I)
+for J=1,#I do
+I[J].Parent=self
+end
+end
+
+function H:Elements(I)
+for J,K in pairs(I)do
+if type(K)=="table"then
+D.SetProperties(G:Create(self,J),K)
+else
+G:Create(self,J,K)
+end
+end
+end
+
+function H:ThemeTag(I)
+local J=I.OBJECTS
+I.OBJECTS=nil
+return(J or C):add(self,I)
+end
+
+function D:SetProperties(I)
+for J,K in pairs(I)do
+if H[J]then
+H[J](self,K)
+else
+self[J]=K
+end
+end
+end
+
+function D:SetValues(...)
+local I=self
+
+for J,K in{...}do
+local L=typeof(K)
+
+if L=="table"then
+D.SetProperties(I,K)
+else
+I[if L=="string"then"Name"else"Parent"]=K
+end
+end
+
+return I
+end
+
+local I
+
+function D:Draggable(J,K,L)
+local M,N,O,P
+local Q=K or 0.28
+local R=0
+local S local T=function(
+
+T)
+local U=T.Position-N
+local V
+R=tick()
+
+if L then
+V=L(
+O.X.Scale,O.X.Offset+U.X/J.Scale,
+O.Y.Scale,O.Y.Offset+U.Y/J.Scale
+)
+else
+V=UDim2.new(
+O.X.Scale,O.X.Offset+U.X/J.Scale,
+O.Y.Scale,O.Y.Offset+U.Y/J.Scale
+)
+end
+self.Position=self.Position:Lerp(V,Q)end local U=function()
+
+
+
+while I==self do
+if(tick()-R)>=1 then
+S()
+break
+end
+task.wait()
+end end
+
+
+local V={
+[Enum.UserInputType.MouseButton1]=true,
+[Enum.UserInputType.Touch]=true
+}
+
+local W={
+[Enum.UserInputType.MouseMovement]=true,
+[Enum.UserInputType.Touch]=true
+}
+
+u(self.InputBegan,function(X)
+if A==false and I==nil and V[X.UserInputType]then
+N=X.Position
+O=self.Position
+I=self
+R=tick()
+A=true
+
+local Y;
+
+function S()
+A=false
+I=nil
+Y:Disconnect()
+end
+
+task.spawn(U)
+
+Y=X.Changed:Connect(function()
+if X.UserInputState==Enum.UserInputState.End then
+S()
+end
+end)
+end
+end)
+
+u(i.InputChanged,function(X)
+if I==self and W[X.UserInputType]then
+T(X)
+end
+end)
+end
+
+function D:CreateNewTemplate(J)
+return D.CloneObject(F[self],J)
+end
+
+function D.new(J,...)
+return D.SetValues(Instance.new(J),...)
+end
+
+E=D.new
+end local F=function(
+
+F)
+if F==nil then
+return{}
+end
+
+if type(F)~="function"and type(F)~="table"then
+error(`Failed to get Callback: 'function', or 'table' expected, got {typeof(F)}`,2)
+end
+
+if type(F)~="function"then
+local G=F[1]
+local H=F[2]
+
+F=function(I)
+G[H]=I
+end
+end
+
+return table.pack(F)end local G=function(
+
+
+G, ...)
+for H=1,#G do
+task.spawn(G[H],...)
+end end
+
+
+local H="redz-library-v5"
+local I=q:FindFirstChild(H)
+
+if not I then
+I=E("ScreenGui",H,q,{
+IgnoreGuiInset=true
+})
+end local J=function(
+
+J, K, L, M, ...)
+local N=TweenInfo.new(M,EasingStyle or Enum.EasingStyle.Quint,...)
+
+return j:Create(J,N,{
+[K]=L
+})end local K=function(
+
+
+K)
+local L={}
+for M=1,#K do
+rawset(L,K[M],true)
+end
+return L end
+
+
+local L=K(string.split"\n\t,_:;()[]#&=!. \"'*^<>$")local M=function(
+
+M)
+return string.gsub(M:lower(),".",function(N)
+return L[N]and""or N
+end)end local N=function(
+
+
+N)
+local O,P,Q=tostring(N),"",0
+
+for R=#O,1,-1 do
+P=O:sub(R,R)..P
+Q+=1
+
+if R>1 and Q%3==0 then
+P=","..P
+end
+end
+
+return P end local O=function(
+
+
+O)
+local P="rbxassetid://"
+return O:sub(1,#P)==P end local P=function(
+
+
+P)
+return(t.Y/450)*P end local Q=function(
+
+
+Q)
+local R=math.floor(Q/60)
+local S=math.floor(Q/60/60)
+Q=math.floor((Q-(R*60))*10)/10
+R=R-(S*60)
+
+if S>0 then
+return`{S}h {R}m {math.floor(Q)}s`
+elseif R>0 then
+return`{R}m {math.floor(Q)}s`
+else
+return tostring(Q)
+end end
+
+
+local R={}do
+local S={}
+local SearchIndex = {}
+local tabHiddenState = {}
+local T={}
+local U={}
+local V={}
+
+local W
+local X
+local Y
+local Z
+local _
+local aa
+local ab
+local ac
+local ad
+local ae
+
+local af=""
+
+local ag={SelectedTab=1,Minimized=false}
+ag.__index=ag
+
+local ah={}
+ah.__index=ah
+
+local ai={}
+ai.__index=ai
+
+local aj={}
+aj.__index=aj
+
+local ak={}do local al=function()
+
+local al={}
+al.__index=function(am,an)
+return al[an]or rawget(ai,an)
+end
+
+return al end
+
+
+local am=al()
+ak.TextBox=am
+
+local an=al()
+ak.Toggle=an
+
+local ao=al()
+ak.Slider=ao
+
+local ap=al()
+ak.Dropdown=ap
+
+local aq=al()
+ak.Keybind=aq
+
+local ar=al()
+ak.Dialog=ar local as=function()
+
+
+Z.Closed=true
+Z.Closing=false
+setmetatable(Z,nil)
+
+Z=nil
+aa.Parent=nil end local at=function()
+
+
+
+if Z~=nil then
+Z:Close()
+end end
+
+
+function ar:NewOption(au)
+local av=au[1]or au.Name or au.Title
+local aw=F(au[2]or au.Callback)
+
+table.insert(aw,at)
+
+assert(type(av)=="string",`"Dialog.NewOption.Name". 'string' expected, got {typeof(av)}`)
+
+local ax=E("TextButton",{
+AutoButtonColor=false,
+Size=UDim2.fromScale(0.2,1),
+BackgroundTransparency=1,
+TextSize=10,
+Text=av,
+Elements={
+Corner=UDim.new(1,0)
+},
+ThemeTag={
+BackgroundColor3="Colors.Buttons.Default",
+TextColor3="Colors.Text.Dark",
+Font="Font.Normal"
+}
+})
+
+local ay=J(ax,"BackgroundTransparency",0,0.3)
+local az=J(ax,"BackgroundTransparency",1,0.3)
+
+u(ax.MouseLeave,function()az:Play()end)
+u(ax.MouseEnter,function()ay:Play()end)
+u(ax.Activated,function()G(aw)end)
+
+ax.Parent=aa.Template.Options
+end
+
+function ar:Close(au)
+if self.Closed or self.Closing or Z~=self then
+return nil
+end
+
+self.Closing=true
+
+local av=J(self.TEMPLATE,"Size",self.NEW_SIZE,0.1)
+av:Play()
+
+if au then
+av.Completed:Wait()
+as()
+else
+u(av.Completed,as)
+end
+end
+
+function ar.new(au,av)
+return setmetatable({
+TITLE_LABEL=av,
+DESCRIPTION_LABEL=au,
+Content=au.Text,
+Title=av.Text,
+
+Closed=false,
+Closing=false,
+Kind="Dialog"
+},ar)
+end
+
+function ap:SetEnabled(au)
+assert(type(au)=="table",`"Dropdown.SetEnabled[param 1]". 'table' expected, got {typeof(au)}`)
+
+self.SET_ENABLED_OPTIONS(au)
+end
+
+function ap:Clear()
+self.CLEAR_DROPDOWN()
+end
+
+function ap:NewOptions(...)
+self:Clear()
+self:Add(...)
+end
+
+function ap:GetOptionsCount()
+return#self.DROPDOWN_OPTIONS
+end
+
+function ap:Remove(...)
+local au={...}
+assert(#au>0,"'Dropdown.Remove' requires one or more options.")
+
+for av,aw in au do
+self.REMOVE_DROPDOWN_OPTION(aw)
+end
+end
+
+function ap:Add(...)
+local au={...}
+assert(#au>0,"'Dropdown.Add' requires one or more options.")
+
+for av,aw in au do
+self.ADD_DROPDOWN_OPTION(aw)
+end
+end
+
+function ap.new(au,av,aw,ax,ay)
+return setmetatable({
+CALLBACKS=ay,
+
+DESTROY_ELEMENT=av,
+VISIBLE_ELEMENT=av,
+
+TITLE_LABEL=aw,
+DESCRIPTION_LABEL=ax,
+Description=ax.Text,
+Title=aw.Text,
+
+Parent=au,
+Kind="Dropdown"
+},ap)
+end
+
+function ao:SetValue(au)
+assert(type(au)=="number",`"Slider.SetValue". 'number' expected, got {typeof(au)}`)
+
+if self.Value~=au then
+self.WHEN_VALUE_CHANGED(au)
+end
+end
+
+function ao.new(au,av,aw,ax,ay)
+return setmetatable({
+CALLBACKS=ay,
+
+DESTROY_ELEMENT=av,
+VISIBLE_ELEMENT=av,
+
+TITLE_LABEL=aw,
+DESCRIPTION_LABEL=ax,
+Description=ax.Text,
+Title=aw.Text,
+
+Parent=au,
+Kind="Slider"
+},ao)
+end
+
+function an:SetValue(au)
+assert(type(au)=="boolean",`"Toggle.SetValue". 'boolean' expected, got {typeof(au)}`)
+
+if self.Value~=au then
+self.Value=au
+self.WHEN_VALUE_CHANGED(au)
+end
+end
+
+function an.new(au,av,aw,ax,ay,az)
+return setmetatable({
+CALLBACKS=az,
+WHEN_VALUE_CHANGED=ay,
+
+DESTROY_ELEMENT=av,
+VISIBLE_ELEMENT=av,
+
+TITLE_LABEL=aw,
+DESCRIPTION_LABEL=ax,
+Description=ax.Text,
+Title=aw.Text,
+
+Parent=au,
+Kind="Toggle"
+},an)
+end
+
+function am:SetText(au)
+assert(type(au)=="string",`"TextBox.SetText". 'string' expected, got {typeof(au)}`)
+
+self.TEXTBOX.Text=au
+return self
+end
+
+function am:SetPlaceholder(au)
+assert(type(au)=="string",`"TextBox.SetPlaceholder". 'string' expected, got {typeof(au)}`)
+
+self.TEXTBOX.PlaceholderText=au
+return self
+end
+
+function am:CaptureFocus()
+self.TEXTBOX:CaptureFocus()
+return self
+end
+
+function am:Clear()
+self.TEXTBOX.Text=""
+return self
+end
+
+function am:SetTextFilter(au)
+if au~=nil then
+assert(type(au)=="function",`"TextBox.SetTextFilter[param 1]". 'function', or 'nil' expected, got {typeof(au)}`)
+end
+
+self.TEXTBOX_TEXT_FILTER=au
+return self
+end
+
+function am.new(au,av,aw,ax,ay,az)
+return setmetatable({
+Title=av.Text,
+Description=aw.Text,
+DESCRIPTION_LABEL=aw,
+TITLE_LABEL=av,
+
+CALLBACKS=az,
+DESTROY_ELEMENT=ax,
+VISIBLE_ELEMENT=ax,
+
+TEXTBOX=ay,
+BUTTON=ax,
+
+Parent=au,
+Kind="TextBox"
+},am)
+end
+
+am.Set=am.SetText
+an.Set=an.SetValue
+ao.Set=ao.SetValue
+end
+-- Loại emoji/ký hiệu khỏi CHỮ HIỂN THỊ của tab (trình execute mobile hay render
+-- emoji thành glyph đơn sắc đè lên chữ). .Title gốc vẫn giữ nguyên cho API/search.
+local function aCleanTitle(t)
+if type(t)~="string" then return t end
+local out=table.create(#t)
+for p,c in utf8.codes(t) do
+local drop=(c>=0x2100 and c<=0x2BFF)or(c>=0x1F000)or(c==0xFE0F)or(c==0x200D)or(c>=0x200 and c<0x400)
+if not drop then
+table.insert(out,utf8.char(c))
+end
+end
+return table.concat(out)
+end local al=function(
+
+al, am, an)
+-- Nút tab kiểu sidebar dọc: bề ngang full, chữ canh trái, icon nằm trước chữ
+local ao=E("TextButton","Button",an,{
+Size=UDim2.new(1,0,0,26),
+AutoButtonColor=false,
+Text=aCleanTitle(am.Title),
+TextSize=11,
+TextXAlignment=Enum.TextXAlignment.Left,
+TextYAlignment=Enum.TextYAlignment.Center,
+TextTruncate=Enum.TextTruncate.AtEnd,
+TextTransparency=0,
+TextStrokeColor3=Color3.fromRGB(3,32,20),
+TextStrokeTransparency=0.75,
+BackgroundTransparency=1,
+Elements={
+Corner=UDim.new(0,7),
+Padding={
+PaddingLeft=UDim.new(0,12),
+PaddingRight=UDim.new(0,8)
+},
+Gradient={
+Rotation=90,
+ThemeTag={Color="Glass.TabSheen"}
+}
+},
+ThemeTag={
+BackgroundColor3="Glass.Tab",
+TextColor3="Glass.Text",
+Font="Font.Medium"
+}
+})
+
+-- Vạch neon dọc bên trái tab đang chọn
+local ap=E("Frame","Indicator",ao,{
+Position=UDim2.new(0,0,0.5),
+AnchorPoint=Vector2.new(0,0.5),
+Size=UDim2.new(0,2.5,0.62,0),
+BackgroundTransparency=1,
+Elements={
+Corner=UDim.new(1,0),
+Gradient={
+Rotation=90,
+ThemeTag={Color="Glass.LineGradient",Transparency="Glass.LineTransparency"}
+}
+},
+ThemeTag={
+BackgroundColor3="Glass.White"
+}
+})
+
+local aq=E("ScrollingFrame","Container",{
+Size=UDim2.new(1,0,1,0),
+Position=UDim2.new(0,0,1),
+AnchorPoint=Vector2.new(0,1),
+ScrollBarThickness=1.5,
+BackgroundTransparency=1,
+ScrollBarImageTransparency=0.35,
+AutomaticCanvasSize=Enum.AutomaticSize.Y,
+ScrollingDirection=Enum.ScrollingDirection.Y,
+BorderSizePixel=0,
+CanvasSize=UDim2.new(),
+ThemeTag={
+ScrollBarImageColor3="Glass.Neon"
+},
+Elements={
+Padding={
+PaddingLeft=UDim.new(0,10),
+PaddingRight=UDim.new(0,10),
+PaddingTop=UDim.new(0,10),
+PaddingBottom=UDim.new(0,10)
+},
+ListLayout={
+Padding=UDim.new(0,5)
+}
+}
+})
+
+local ar=E("ImageLabel","Icon",ao,{
+Position=UDim2.new(0,8,0.5),
+Size=UDim2.new(0,14,0,14),
+AnchorPoint=Vector2.new(0,0.5),
+BackgroundTransparency=1,
+ImageTransparency=0.3,
+Image=am.Icon or""
+})local as=function()
+
+
+local as=string.sub(ar.Image,1,13)=="rbxassetid://"
+ar.Visible=as
+-- tự chữa: icon LUÔN ở ô trái 8px, chữ LUÔN canh trái sau icon -> không thể đè lên nhau
+ar.Position=UDim2.new(0,8,0.5)
+ar.AnchorPoint=Vector2.new(0,0.5)
+ar.Size=UDim2.new(0,14,0,14)
+ao.TextXAlignment=Enum.TextXAlignment.Left
+ao.TextTruncate=Enum.TextTruncate.AtEnd
+ao.UIPadding.PaddingLeft=UDim.new(0,as and 30 or 12)end
+
+
+u(ar:GetPropertyChangedSignal"Image",as)
+as()
+
+return ao,aq,ap,ar end local am=function(
+
+
+am, an, ao, ap)
+local aq=E("TextLabel",{
+TextXAlignment=Enum.TextXAlignment.Left,
+TextTruncate=Enum.TextTruncate.AtEnd,
+AutomaticSize=Enum.AutomaticSize.Y,
+Size=UDim2.new(1,-20),
+Position=UDim2.fromScale(0,0.5),
+AnchorPoint=Vector2.new(0,0.5),
+BackgroundTransparency=1,
+TextSize=11,
+ThemeTag={
+OBJECTS=C,
+TextColor3="Colors.Text.Default",
+Font="Font.Medium"
+}
+})
+
+local ar=V[am]
+local as=T[am].Container
+
+local at=E("TextLabel",{
+TextXAlignment=Enum.TextXAlignment.Left,
+AutomaticSize=Enum.AutomaticSize.Y,
+Size=UDim2.new(1,-20),
+Position=UDim2.new(0,12,0,15),
+BackgroundTransparency=1,
+TextWrapped=true,
+TextSize=8,
+RichText=true,
+ThemeTag={
+OBJECTS=ar,
+TextColor3="Colors.Text.Dark",
+Font="Font.Normal"
+}
+})
+
+local au={
+OBJECTS=ar,
+BackgroundColor3="Glass.Card"
+}
+
+local av=E("TextButton","Option",{
+AutomaticSize=Enum.AutomaticSize.Y,
+Size=UDim2.new(1,0,0,25),
+AutoButtonColor=false,
+Text="",
+BackgroundTransparency=0.25,
+ThemeTag=au,
+Elements={
+Corner=UDim.new(0,8),
+Stroke={
+ThemeTag={Color="Glass.Edge"},
+Thickness=1,
+Transparency=0.86
+},
+Gradient={
+Rotation=115,
+ThemeTag={Color="Glass.CardSheen",Transparency="Glass.CardSheenTransparency"}
+}
+},
+Childs={
+E("Frame","Holder",{
+AutomaticSize=Enum.AutomaticSize.Y,
+BackgroundTransparency=1,
+Size=ap,
+Elements={
+ListLayout={
+SortOrder=Enum.SortOrder.LayoutOrder,
+VerticalAlignment=Enum.VerticalAlignment.Center,
+Padding=UDim.new(0,2)
+},
+Padding={
+PaddingBottom=UDim.new(0,5),
+PaddingTop=UDim.new(0,5)
+}
+},
+Childs={aq,at}
+})
+}
+})
+
+local aw=av.Holder local ax=function(
+
+ax, ay)
+if ay then
+if _ then
+local az=w(s.CurrentTheme,"Glass.Card")
+_.Theme.BackgroundColor3="Glass.Card"
+J(_.Button,"BackgroundColor3",az,0.2):Play()
+end
+
+_={
+Button=av,
+Theme=au
+}
+end
+
+au.BackgroundColor3=ax
+J(av,"BackgroundColor3",w(s.CurrentTheme,ax),0.2):Play()end
+
+
+u(av.MouseLeave,function()ax("Glass.Card",false)end)
+u(av.MouseEnter,function()ax("Glass.CardHover",true)end)
+
+u(at:GetPropertyChangedSignal"Text",function()
+local ay=#at.Text>0
+
+if at.Visible~=ay then
+local az=ay and 0 or 0.5
+at.Visible=ay
+aw.Position=UDim2.fromScale(0,az)
+aw.AnchorPoint=Vector2.new(0,az)
+end
+end)
+
+aq.Text=an
+at.Text=ao or""
+
+av.Parent=as
+
+return av,aq,at end local an=function(
+
+
+an, ao)
+if type(ao)~="table"then
+error(`"Tab.Add{an}[Configs]". 'table' expected, got {typeof(ao)}`,2)
+end
+
+local ap=ao[1]or ao.Name or ao.Title
+local aq=ao.Desc or ao.Description
+
+assert(type(ap)=="string",`"Tab.Add{an}.Title". 'string' expected, got {typeof(ap)}`)
+
+if aq~=nil and type(aq)~="string"then
+error(`"Tab.Add{an}.Description". 'string', or 'nil' expected, got {typeof(aq)}`,2)
+end
+
+return ap,aq or""end local ao=function(
+
+
+ao, ap)
+if ap~=nil and type(ap)~="string"then
+error(`"Tab.Add{ao}.Flag". 'nil', or 'string' expected, got {typeof(ap)}`)
+end
+
+return ap end local ap=function()
+
+
+
+local ap=160
+
+local aq={
+Corner=UDim.new(0,6),
+Stroke={
+ThemeTag={
+Color="Colors.Stroke"
+}
+},
+Gradient={
+Rotation=45,
+ThemeTag={
+Color="Colors.Background"
+}
+}
+}
+
+local ar=E("TextButton",OutBox,{
+Size=UDim2.fromScale(1,1),
+BackgroundTransparency=1,
+Active=true,
+Text=""
+})
+
+local as=E("Frame","Dropdown",ar,{
+Size=UDim2.fromOffset(ap,100),
+Position=UDim2.fromOffset(50,50),
+Elements=aq,
+Active=true,
+ThemeTag={
+BackgroundTransparency="BackgroundTransparency"
+}
+})
+
+local at=E("TextButton","Search",as,{
+Position=UDim2.new(1,5,0,5),
+Size=UDim2.new(0,25,0,25),
+AutomaticSize=Enum.AutomaticSize.X,
+Active=true,
+Elements=aq,
+Text="",
+ThemeTag={
+BackgroundTransparency="BackgroundTransparency"
+},
+Childs={
+E("UIPadding",{
+PaddingLeft=UDim.new(0,5),
+PaddingRight=UDim.new(0,5),
+PaddingBottom=UDim.new(0,5),
+PaddingTop=UDim.new(0,5)
+}),
+E("UIListLayout",{
+Padding=UDim.new(0,5),
+FillDirection=Enum.FillDirection.Horizontal
+}),
+E("TextBox","SearchBox",{
+Size=UDim2.fromScale(0,1),
+Position=UDim2.fromScale(0.5,0.5),
+AnchorPoint=Vector2.new(0.5,0.5),
+Visible=false,
+PlaceholderText="Search Section And Function",
+ClearTextOnFocus=false,
+Text="",
+Elements={
+Corner=UDim.new(0,6)
+},
+ThemeTag={
+BackgroundColor3="Colors.Stroke",
+TextColor3="Colors.Text.Default",
+Font="Font.ExtraBold"
+}
+}),
+E("ImageLabel","SearchIcon",{
+Size=UDim2.fromScale(1,1),
+SizeConstraint=Enum.SizeConstraint.RelativeYY,
+Position=UDim2.fromScale(0.5,0.5),
+AnchorPoint=Vector2.new(0.5,0.5),
+BackgroundTransparency=1,
+ThemeTag={
+BackgroundColor3="Colors.Stroke",
+ImageColor3="Colors.Icons",
+Image="Icons.Search"
+}
+})
+}
+})
+
+local au=E("ScrollingFrame",as,{
+Size=UDim2.new(1,-6,1,-6),
+Position=UDim2.fromScale(0.5,0.5),
+AnchorPoint=Vector2.new(0.5,0.5),
+ScrollBarThickness=3,
+BackgroundTransparency=1,
+BorderSizePixel=0,
+CanvasSize=UDim2.new(),
+ScrollingDirection=Enum.ScrollingDirection.Y,
+AutomaticCanvasSize=Enum.AutomaticSize.Y,
+Active=true,
+ThemeTag={
+OBJECTS=C,
+ScrollBarImageColor3="Colors.ScrollBar"
+},
+Elements={
+Padding={
+PaddingLeft=UDim.new(0,8),
+PaddingRight=UDim.new(0,8),
+PaddingTop=UDim.new(0,5),
+PaddingBottom=UDim.new(0,5)
+},
+ListLayout={
+Padding=UDim.new(0,4)
+}
+}
+})
+
+local av=at.SearchIcon
+local aw=at.SearchBox
+
+local ax=130
+
+local ay=J(as,"Size",UDim2.fromOffset(ap,0),0.2)
+local az=J(aw,"Size",UDim2.new(0,ax-30,1,0),0.3)
+local aA=J(aw,"Size",UDim2.new(0,0,1,0),0.2)
+
+local aB={}
+local aC=false
+local aD=false
+local aE
+local aF
+local aG
+local aH
+local aI
+
+local aJ=0
+
+local aK=25
+local aL=(aK*12)+10
+local aM=5 local aN=function(
+
+aN)
+local aO=I.AbsoluteSize.Y/ad.Scale
+return math.min((aK*math.max(aN,0.5))+10,aL,aO/1.75)end local aO=function()
+
+
+
+local aO=as.AbsolutePosition
+local aP=as.AbsoluteSize
+
+local aQ=Vector2.new(p.X,p.Y)
+
+local aR=aQ.X>=aO.X and aQ.X<=(aO.X+aP.X)
+local aS=aQ.Y>=aO.Y and aQ.Y<=(aO.Y+aP.Y)
+
+return aR and aS end local aP=function(
+
+
+aP, aQ)
+local aR=aI.AbsolutePosition
+local aS=aI.AbsoluteSize
+local aT=I.AbsoluteSize
+local aU=ad.Scale
+local aV=aN(aP)
+
+local aW=aT.X/aU
+local aX=aT.Y/aU
+local aY=aR.X/aU
+local aZ=aR.Y/aU
+local a_=aS.X/aU
+local a0=aS.Y/aU
+
+local a1=aZ+(a0/2)
+local a2=a1-(aV/2)
+
+local a3=aM
+local a4=aX-aV-aM
+
+local a5=math.clamp(a2,a3,a4)
+
+local a6=Vector2.new(0,0)
+
+if a5>(aX*0.7)then
+a6=Vector2.new(0,1)
+a5=math.min(a1+(aV/2),aX-aM)
+end
+
+local a7=math.clamp(
+aY,
+aM,
+aW-as.Size.X.Offset-(aM*2)-(at.AbsoluteSize.X/aU)
+)
+
+return Vector2.new(a7,a5),a6 end local aQ=function(...)
+
+
+
+local aQ,aR=aP(...)
+
+as.AnchorPoint=aR
+as.Position=UDim2.fromOffset(aQ.X,aQ.Y)end local aR=function()
+
+
+
+if not aD then return end
+
+aD=false
+
+aw.Text=""
+aA:Play()
+aA.Completed:Wait()
+aw.Visible=false end local aS=function()
+
+
+
+if aD then return end
+
+aD=true
+
+aw.Visible=true
+az:Play()
+
+aw:CaptureFocus()
+
+local aS=as.AbsoluteSize
+local aT=I.AbsoluteSize
+local aU=ad.Scale
+local aV=as.AnchorPoint
+
+local aW=ax*aU
+
+local aX=as.AbsolutePosition.X
+
+local aY=aX+aS.X+5+aW
+
+if aY>aT.X-(aM*aU)then
+local aZ=(aT.X-aS.X-aW-5-(aM*aU))/aU
+
+aZ=math.max(aZ,aM)
+
+J(as,"Position",UDim2.fromOffset(aZ,as.Position.Y.Offset),0.3):Play()
+end end local aT=function(
+
+
+aT)
+if not aC then
+aE=aT
+ar.Parent=Y
+return true
+end end local aU=function()
+
+
+
+if aC then return end
+
+if aE then
+aE()
+aE=nil
+end
+
+task.spawn(aR)
+aC=true
+ay:Play()
+ay.Completed:Wait()
+ar.Parent=nil
+aC=false end local aV=function()
+
+
+
+if aw:IsFocused()then
+aJ=tick()
+return nil
+end
+
+if(tick()-aJ)>=0.3 and not aO()then
+aU()
+end end local aW=function()
+
+
+
+for aW,aX in aB do
+aW.Parent=nil
+aB[aW]=nil
+end end local aX=function(
+
+
+aX, aY)
+aX.Selected=aY
+
+if aX.Instance then
+local aZ=aX.Instance
+local a_=aZ.TextLabel
+local a0=aZ.Frame
+
+local a1=aY and 0 or(aH and 0.8 or 1)
+local a2=aY and 0 or 0.4
+local a3=UDim2.fromOffset(4,aY and 14 or 4)
+
+if aZ.Parent then
+J(a0,"BackgroundTransparency",a1,0.35):Play()
+J(a_,"TextTransparency",a2,0.35):Play()
+J(a0,"Size",a3,0.35):Play()
+else
+a_.TextTransparency=a2
+a0.BackgroundTransparency=a1
+a0.Size=a3
+end
+end end local aY=function(
+
+
+aY)
+if aw.Visible==false or not aY then
+local aZ=aG and#aG or 0
+as.Size=UDim2.fromOffset(ap,aN(aZ))
+return nil
+end
+
+if aY then
+local aZ=aY.Instance
+local a_=M(aw.Text)
+aZ.Visible=#a_==0 or aY.SearchText:find(a_)~=nil
+
+if aZ.Visible~=false then
+SEARCH_RESULT_COUNT = (SEARCH_RESULT_COUNT or 0) + 1
+as.Size=UDim2.fromOffset(ap,aN(SEARCH_RESULT_COUNT))
+end
+end end local aZ=function(
+
+
+aZ, a_, a0, a1)
+local a2=true
+
+if a_=="+"or a_=="-"then
+a2=aZ.Selected==(a_=="+")
+a0=a0:sub(2,-1)
+end
+
+return a2 and a1:find(a0,1,true)~=nil end local a_=function(
+
+
+a_, a0)
+local a1=E("TextButton",{
+Size=UDim2.new(1,0,0,21),
+AutoButtonColor=false,
+Text="",
+Elements={
+Corner=UDim.new(0,4)
+},
+ThemeTag={
+BackgroundColor3="Colors.Buttons.Default"
+},
+Childs={
+E("Frame",{
+Position=UDim2.new(0,1,0.5),
+Size=UDim2.new(0,4,0,4),
+BackgroundTransparency=1,
+AnchorPoint=Vector2.new(0,0.5),
+Elements={
+Corner=UDim.new(0.5,0)
+},
+ThemeTag={
+BackgroundColor3="Colors.Primary"
+}
+}),
+E("TextLabel",{
+Size=UDim2.fromScale(1,1),
+Position=UDim2.fromOffset(10,0),
+TextXAlignment=Enum.TextXAlignment.Left,
+BackgroundTransparency=1,
+TextTransparency=0.4,
+Text=a_.DisplayName,
+TextSize=9,
+ThemeTag={
+Font="Font.Bold",
+TextColor3="Colors.Text.Default"
+}
+})
+}
+})
+
+local a2=0
+
+u(a1.Activated,function()
+if(tick()-a2)<0 then return end
+
+if ar.Parent and not aC then
+a2=tick()+0.2
+aF(a_)
+end
+end)
+
+a_.SearchText=M(a_.DisplayName)
+a_.Instance=a1
+
+if a0 then
+local a3=aw.Text
+
+if#a3>0 then
+local a4=string.sub(a3,1,1)
+local a5=M(aw.Text)
+a1.Visible=aZ(a_,a4,a5,a_.SearchText)
+end
+
+a1.Parent=au
+aY(a_)
+end
+
+aX(a_,a_.Selected)end local a0=function(
+
+
+a0)
+aW()
+aG=a0
+
+for a1=1,#a0 do
+local a2=a0[a1]
+local a3=a2.Instance
+
+if a3==nil then
+a_(a2)
+a3=a2.Instance
+end
+
+a3.Parent=au
+aB[a3]=true
+end
+
+aQ(#a0)
+J(as,"Size",UDim2.fromOffset(ap,aN(#a0)),0.3):Play()end local a1=function()
+
+
+
+local a1=aw.Text
+local a2=string.sub(a1,1,1)
+local a3=M(a1)
+local a4=#a3==0
+local a5=0
+
+for a6=1,#aG do
+local a7=aG[a6]
+local a8=a4 or aZ(a7,a2,a3,a7.SearchText)
+a7.Instance.Visible=a8
+
+if a8 then
+a5+=1
+end
+end
+
+SEARCH_RESULT_COUNT=a5
+as.Size=UDim2.fromOffset(ap,aN(a5))end
+
+
+u(ab:GetPropertyChangedSignal"Visible",aV)
+u(ab:GetPropertyChangedSignal"Size",aV)
+u(ar.MouseButton1Down,aV)
+u(ar.Activated,aV)
+
+u(at.Activated,aS)
+u(aw:GetPropertyChangedSignal"Text",a1)
+
+return table.freeze{
+CreateOptionTemplate=a_,
+SetOptionValue=aX,
+CloseDropdown=aU,
+OpenDropdown=aT,
+SetOptions=a0,
+Clear=aW,
+SetOnClicked=function(...)
+aF=...
+end,
+SetMultiSelect=function(...)
+aH=...
+end,
+SetHolder=function(...)
+aI=...
+end
+}end
+
+
+local aq
+
+local ar={"W","A","S","D","Tab","Slash","Backspace","Escape","Unknown"}
+local as={"MouseButton1","MouseButton2","MouseButton3"}
+
+local at=K({"number","string","nil","boolean","table"},true)local au=function(
+
+au)
+if aq==nil then
+aq=K(Enum.KeyCode:GetEnumItems())
+end
+
+return typeof(au)=="EnumItem"and aq[au]end
+
+
+function ah:GetNoSelfCall(av)
+assert(type(av)=="string",`"Tab.GetNoSelfCall". 'string' expected, got {typeof(av)}`)
+local aw=self[av]
+assert(type(aw)=="function",`"Tab.GetNoSelfCall". '{aw}' is not a 'function'-{av}`)
+
+return function(...)
+return aw(self,...)
+end
+end
+
+function ah:AddSection(av)
+    assert(av==nil or type(av)=="string",`"Tab.AddSection[param 1]". 'string', or 'nil' expected, got {typeof(av)}`)
+    av=av or""
+
+    local aw=V[self]
+
+    local ax=E("Frame","Option",T[self].Container,{
+        Size=UDim2.new(1,0,0,26),
+        BackgroundTransparency=1
+    })
+
+    local ay=E("TextLabel",ax,{
+        TextXAlignment=Enum.TextXAlignment.Left,
+        TextTruncate=Enum.TextTruncate.AtEnd,
+        Size=UDim2.new(1,-25,1,-4),
+        Position=UDim2.new(0,5,0,0),
+        BackgroundTransparency=1,
+        TextSize=12,
+        Text=av,
+        ThemeTag={
+            OBJECTS=aw,
+            TextColor3="Glass.Text",
+            Font="Font.ExtraBold"
+        }
+    })
+
+    -- Đường kẻ phân cách xanh dưới section header
+    E("Frame","SectionSep",ax,{
+        Size=UDim2.new(1,-10,0,1),
+        Position=UDim2.new(0,5,1,-1),
+        AnchorPoint=Vector2.new(0,1),
+        BorderSizePixel=0,
+        BackgroundTransparency=0.35,
+        Elements={
+            Gradient={
+                Rotation=0,
+                ThemeTag={Color="Glass.LineGradient",Transparency="Glass.LineTransparency"}
+            }
+        },
+        ThemeTag={
+            OBJECTS=aw,
+            BackgroundColor3="Glass.White"
+        }
+    })
+
+    local obj = setmetatable({
+        Title=av,
+        DESTROY_ELEMENT=ax,
+        VISIBLE_ELEMENT=ax,
+        TITLE_LABEL=ay,
+        Kind="Section",
+        Parent=self
+    },ai)
+
+    table.insert(SearchIndex, {
+        Title = av:lower():gsub("[%s%p%c]",""), 
+        Kind = "section", 
+        Tab = self, 
+        Frame = ax, 
+        IsSection = true
+    }) 
+
+    return obj
+end
+
+function ah:AddToggle(av)
+local aw,ax=an("Toggle",av)
+local ay=ao("Toggle",av[4]or av.Flag)
+
+local az=av[2]or av.Default or false
+local aA=F(av[3]or av.Callback)
+
+if type(az)~="boolean"then
+error(`"Tab.AddToggle.Default". 'boolean' expected, got {typeof(az)}`,2)
+end
+
+if ay~=nil and type(ae[ay])=="number"then
+az=ae[ay]==0
+end
+
+local aB=V[self]
+local aC,aD,aE=am(self,aw,ax,UDim2.new(1,-38,0,0))
+
+local aF=E("Frame",aC,{
+Size=UDim2.new(0,35,0,18),
+Position=UDim2.new(1,-10,0.5),
+AnchorPoint=Vector2.new(1,0.5),
+Elements={
+Corner=UDim.new(0.5,0)
+},
+ThemeTag={
+OBJECTS=aB,
+BackgroundColor3="Colors.Stroke"
+}
+})
+
+local aG=E("Frame",aF,{
+BackgroundTransparency=1,
+Size=UDim2.new(0.8,0,0.8,0),
+Position=UDim2.new(0.5,0,0.5,0),
+AnchorPoint=Vector2.new(0.5,0.5)
+})
+
+local aH={
+OBJECTS=aB,
+BackgroundColor3="Colors.OnPrimary"
+}
+
+local aI=E("Frame",aG,{
+Size=UDim2.new(0,12,0,12),
+Position=UDim2.new(0,0,0.5),
+AnchorPoint=Vector2.new(0,0.5),
+Elements={
+Corner=UDim.new(0.5,0)
+},
+ThemeTag=aH
+})
+
+local aJ=tick()
+local aK=0.2
+local aL={}local aM=function(
+
+aM)
+aL={}
+for aN=1,#aM do
+aM[aN]:Play()
+aL[aN]=aM[aN]
+end end local aN=function()
+
+
+
+for aN=#aL,1,-1 do
+local aO=aL[aN]
+if aO.PlaybackState==Enum.PlaybackState.Playing then
+aO:Cancel()
+end
+aL[aN]=nil
+end end local aO=function(
+
+
+aO)
+if ay~=nil then ae[ay]=aO and 0 or 1 end
+G(aA,aO)
+
+local aP=UDim2.new(aO and 1 or 0,0,0.5,0)
+local aQ=Vector2.new(aO and 1 or 0,0.5)
+local aR=aO and"Colors.Primary"or"Colors.OnPrimary"
+local aS=w(s.CurrentTheme,aR)
+
+aH.BackgroundColor3=aR
+
+if self.Selected and(tick()-aJ)>=aK then
+aM{
+J(aI,"Position",aP,0.25),
+J(aI,"AnchorPoint",aQ,0.25),
+J(aI,"BackgroundColor3",aS,0.25)
+}
+else
+aN()
+aI.Position=aP
+aI.AnchorPoint=aQ
+aI.BackgroundColor3=aS
+end
+
+aJ=tick()end
+
+
+local aP=ak.Toggle.new(self,aC,aD,aE,aO,aA)
+table.insert(SearchIndex,{Title=aw:lower():gsub("[%s%p%c]",""),Kind="toggle",Tab=self,Frame=aC})
+aP:SetValue(az)
+
+local aQ=0
+
+u(aC.Activated,function()
+if(tick()-aQ)>=aK then
+aQ=tick()
+aP:SetValue(not aP.Value)
+end
+end)
+
+return aP
+end
+
+function ah:AddButton(av)
+local aw,ax=an("Button",av)
+local ay=F(av[2]or av.Callback)
+local az=av.Debounce or av.Cooldown
+
+local aA=V[self]
+local aB,aC,aD=am(self,aw,ax,UDim2.new(1,-20,0,0))
+
+local aE=E("ImageLabel",aB,{
+Size=UDim2.new(0,14,0,14),
+Position=UDim2.new(1,-10,0.5),
+AnchorPoint=Vector2.new(1,0.5),
+BackgroundTransparency=1,
+ThemeTag={
+OBJECTS=aA,
+Image="Icons.Button"
+}
+})
+
+local aF=0
+
+u(aB.Activated,function()
+if az~=nil and(tick()-aF)<0 then return end
+
+if az~=nil then
+aF=tick()+az
+end
+
+G(ay)
+end)
+
+table.insert(SearchIndex,{Title=aw:lower():gsub("[%s%p%c]",""),Kind="button",Tab=self,Frame=aB})
+return setmetatable({
+CALLBACKS=ay,
+DESTROY_ELEMENT=aB,
+VISIBLE_ELEMENT=aB,
+TITLE_LABEL=aC,
+DESCRIPTION_LABEL=aD,
+
+Title=aw,
+Description=ax,
+
+Parent=self,
+Kind="Button"
+},ai)
+end
+
+function ah:AddTextBox(av)
+local aw,ax=an("TextBox",av)
+local ay=ao("TextBox",av[4]or av.Flag)
+
+local az=av[2]or av.Default
+local aA=F(av[3]or av.Callback)
+
+local aB=av.Placeholder or av.PlaceholderText
+local aC=av.ClearOnFocus or av.ClearTextOnFocus
+
+if az~=nil and type(az)~="string"then
+error(`"Tab.AddTextBox.Default". 'string', or 'nil' expected, got {typeof(az)}`,2)
+end
+
+if ay and type(ae[ay])=="string"then
+az=ae[ay]
+end
+
+local aD=V[self]
+local aE,aF,aG=am(self,aw,ax,UDim2.new(1,-150,0,0))
+
+local aH=E("Frame",aE,{
+Size=UDim2.new(0,150,0,18),
+Position=UDim2.new(1,-10,0.5),
+AnchorPoint=Vector2.new(1,0.5),
+ThemeTag={
+OBJECTS=aD,
+BackgroundColor3="Colors.Stroke"
+},
+Elements={
+Corner=UDim.new(0,4)
+}
+})
+
+local aI=E("TextBox",aH,{
+Size=UDim2.new(0.85,0,0.85,0),
+AnchorPoint=Vector2.new(0.5,0.5),
+Position=UDim2.new(0.5,0,0.5,0),
+BackgroundTransparency=1,
+TextScaled=true,
+Active=true,
+Text="",
+PlaceholderText=B.TEXTBOX.PLACEHOLDER_TEXT,
+ThemeTag={
+OBJECTS=aD,
+TextColor3="Colors.Text.Default",
+Font="Font.Bold"
+}
+})
+
+local aJ={
+OBJECTS=aD,
+Image="Icons.TextBox",
+ImageColor3="Colors.Icons"
+}
+
+local aK=E("ImageLabel",aH,{
+Size=UDim2.new(0,12,0,12),
+Position=UDim2.new(0,-5,0.5),
+AnchorPoint=Vector2.new(1,0.5),
+BackgroundTransparency=1,
+ThemeTag=aJ
+})
+
+if az~=nil then
+aI.Text=az
+end
+
+if aC~=nil then
+aI.ClearTextOnFocus=aC
+end
+
+if aB~=nil then
+aI.PlaceholderText=aB
+end
+
+local aL=ak.TextBox.new(self,aF,aG,aE,aI,aA)
+table.insert(SearchIndex,{Title=aw:lower():gsub("[%s%p%c]",""),Kind="textbox",Tab=self,Frame=aE})
+local aM=function(
+
+aM)
+aJ.ImageColor3=aM
+J(aK,"ImageColor3",w(s.CurrentTheme,aM),0.5):Play()end
+
+
+if ay~=nil then
+u(aI:GetPropertyChangedSignal"Text",function()
+ae[ay]=aI.Text
+end)
+end
+
+u(aI.Focused,function()
+aM"Colors.Primary"
+end)
+
+u(aI.FocusLost,function()
+aM"Colors.Icons"
+local aN=aL.TEXTBOX_TEXT_FILTER
+
+if aN then
+local aO=aN(aI.Text)
+if type(aO)=="string"then
+aI.Text=aO
+end
+end
+
+G(aA,aI.Text)
+end)
+
+u(aE.Activated,function()
+aI:CaptureFocus()
+end)
+
+return aL
+end
+
+function ah:AddSlider(av)
+local aw,ax=an("Slider",av)
+local ay=ao("Slider",av[7]or av.Flag)
+
+local az=av[2]or av.Min
+local aA=av[3]or av.Max
+local aB=av[4]or av.Increment
+local aC=av[5]or av.Default
+local aD=F(av[6]or av.Callback)
+
+if aB~=nil and type(aB)~="number"then
+error(`"Tab.AddSlider.Increment". 'number', or 'nil' expected, got {typeof(aB)}`,2)
+end
+
+if aC~=nil and type(aC)~="number"then
+error(`"Tab.AddSlider.Default". 'number', or 'nil' expected, got {typeof(aC)}`,2)
+end
+
+assert(type(az)=="number",`"Tab.AddSlider.Min", 'number' expected, got {typeof(az)}`)
+assert(type(aA)=="number",`"Tab.AddSlider.Max", 'number' expected, got {typeof(aA)}`)
+
+local aE=V[self]
+local aF=T[self].Container
+
+local aG,aH,aI=am(self,aw,ax,UDim2.new(0.55,0,0,0))
+
+if aC==nil then
+aC=az
+end
+
+if aB==nil then
+aB=1
+end
+
+if ay~=nil and type(ae[ay])=="number"then
+aC=ae[ay]
+end
+
+local aJ=E("TextButton",aG,{
+Size=UDim2.new(0.45,0,1,0),
+Position=UDim2.new(1,0,0,0),
+AnchorPoint=Vector2.new(1,0),
+AutoButtonColor=false,
+BackgroundTransparency=1,
+Text=""
+})
+
+local aK=E("Frame",aJ,{
+Size=UDim2.new(1,-20,0,6),
+Position=UDim2.fromScale(0.5,0.5),
+AnchorPoint=Vector2.new(0.5,0.5),
+ThemeTag={
+OBJECTS=aE,
+BackgroundColor3="Colors.Stroke"
+},
+Elements={
+Corner=UDim.new(0.5,0)
+}
+})
+
+local aL=E("Frame",aK,{
+Size=UDim2.fromScale(0,1),
+BorderSizePixel=0,
+ThemeTag={
+OBJECTS=aE,
+BackgroundColor3="Colors.Primary"
+},
+Elements={
+Corner=UDim.new(0.5,0)
+}
+})
+
+local aM=E("Frame",aK,{
+Size=UDim2.new(0,6,0,12),
+BackgroundColor3=Color3.fromRGB(220,220,220),
+Position=UDim2.fromScale(0,0.5),
+AnchorPoint=Vector2.new(0.5,0.5),
+BackgroundTransparency=0.2,
+Elements={
+Corner=UDim.new(0,6)
+}
+})
+
+local aN=E("TextLabel",aJ,{
+Size=UDim2.new(0,50,0,14),
+AnchorPoint=Vector2.new(1,0.5),
+Position=UDim2.new(0,-1,0.5,0),
+BackgroundTransparency=1,
+TextSize=12,
+TextXAlignment=Enum.TextXAlignment.Right,
+ThemeTag={
+OBJECTS=aE,
+TextColor3="Colors.Text.Default",
+Font="Font.SliderValue"
+}
+})
+
+local aO=E("UIScale",aN)
+
+local aP=ak.Slider.new(self,aG,aH,aI,aD)
+table.insert(SearchIndex,{Title=aw:lower():gsub("[%s%p%c]",""),Kind="slider",Tab=self,Frame=aG})
+
+aP.Min=az
+aP.Max=aA
+aP.Increment=aB local aQ=function(
+
+aQ)
+return(aQ-az)/(aA-az)end local aR=function(
+
+
+aR)
+return(aR*(aA-az))+az end local aS=function(
+
+
+aS)
+return math.round(aS/aB)*aB end local aT=function(
+
+
+aT, aU)
+if aT==aP.Value then return end
+
+if ay~=nil then
+ae[ay]=aT
+end
+
+task.defer(G,aD,aT)
+aP.Value=aT
+
+local aV=UDim2.fromScale(aU,0.5)
+local aW=UDim2.fromScale(aU,1)
+
+aN.Text=tostring(math.floor(aT*1000)/1000)
+
+if self.Selected then
+J(aM,"Position",aV,0.3):Play()
+J(aL,"Size",aW,0.3):Play()
+else
+aM.Position=aV
+aL.Size=aW
+end end local aU=function(
+
+
+aU)
+local aV=math.clamp(aS(aU),az,aA)
+aT(aV,aQ(aV))end
+
+
+aP.WHEN_VALUE_CHANGED=aU local aV=function(
+
+aV, aW)
+local aX=(p.X-aV.X)/aW.X
+local aY=math.clamp(aX,0,1)
+local aZ=aR(aY)
+local a_=aS(aZ)
+local a0=math.clamp(a_,az,aA)
+aT(a0,aQ(a0))end
+
+
+local aW=Random.new()
+aU(aC)
+
+u(aJ.MouseButton1Down,function()
+if A~=false then return end
+
+J(aM,"BackgroundTransparency",0,0.3):Play()
+aF.ScrollingEnabled=false
+A=true
+
+local aX=aK.AbsolutePosition
+local aY=aK.AbsoluteSize
+
+while i:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)do
+aV(aX,aY)
+task.wait()
+end
+
+A=false
+J(aM,"BackgroundTransparency",0.2,0.3):Play()
+aF.ScrollingEnabled=true
+end)
+
+u(aN:GetPropertyChangedSignal"Text",function()
+if not self.Selected then return end
+
+aO.Scale=0.3
+J(aO,"Scale",1.2,0.1):Play()
+
+local aX=J(aN,"Rotation",aW:NextNumber(-7.5,7.5),0.15)
+aX:Play()
+aX.Completed:Wait()
+
+J(aO,"Scale",1,0.2):Play()
+J(aN,"Rotation",0,0.1):Play()
+end)
+
+return aP
+end
+
+function ah:AddDiscordInvite(av)
+local aw,ax=an("DiscordInvite",av)
+local ay=av.Icon or av.Image or av.Logo
+local az=av.Banner or av.BannerColor
+local aA=av.Online or av.MembersOnline
+local aB=av.Members or av.TotalMembers
+local aC=av.Invite or av.Link
+
+assert(type(aC)=="string",`"Tab.AddDiscordInvite.Invite". 'string' expected, got {typeof(aC)}`)
+
+if az~=nil and typeof(az)~="Color3"and type(az)~="string"then
+error(`"Tab.AddDiscordInvite.Banner". 'nil', 'Color3', or 'string' expected, got {typeof(az)}`,2)
+end
+
+if aA~=nil and type(aA)~="number"then
+error(`"Tab.AddDiscordInvite.Online". 'number' expected, got {typeof(aA)}`,2)
+end
+
+if aB~=nil and type(aB)~="number"then
+error(`"Tab.AddDiscordInvite.Members". 'nil', or 'number' expected, got {typeof(aB)}`,2)
+end
+
+if I.ZIndexBehavior~=Enum.ZIndexBehavior.Sibling then
+I.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+end
+
+local aD=V[self]
+local aE=T[self].Container
+
+local aF=E("Frame","Option",aE,{
+BackgroundTransparency=1,
+Size=UDim2.new(1,0,0,148)
+})
+
+local aG=E("CanvasGroup",aF,{
+Size=UDim2.new(0,178,1,-15),
+Position=UDim2.new(0,5,1,0),
+AnchorPoint=Vector2.new(0,1),
+ClipsDescendants=true,
+Elements={
+Corner=UDim.new(0,9),
+Stroke={
+ThemeTag={
+Color="Colors.Border.Default"
+}
+}
+},
+ThemeTag={
+OBJECTS=aD,
+BackgroundColor3="Colors.Buttons.Default"
+}
+})
+
+local aH=E("ImageLabel",aG,{
+BackgroundColor3=Color3.new(1,1,1),
+Size=UDim2.fromScale(1,0.28),
+BackgroundTransparency=1
+})
+
+local aI=E("TextLabel",aF,{
+Position=UDim2.fromOffset(5,0),
+Size=UDim2.new(1,0,0,15),
+TextColor3=Color3.fromRGB(40,150,255),
+TextXAlignment=Enum.TextXAlignment.Left,
+BackgroundTransparency=1,
+TextSize=9,
+Text=aC,
+ThemeTag={
+OBJECTS=aD,
+TextColor3="Colors.Link",
+Font="Font.Medium"
+}
+})
+
+local aJ=E("ImageLabel",aG,{
+Size=UDim2.fromOffset(33,33),
+Position=UDim2.new(0,10,0.28,0),
+AnchorPoint=Vector2.new(0,0.5),
+Image=ay,
+ThemeTag={
+OBJECTS=aD,
+BackgroundColor3="Colors.Buttons.Default"
+},
+Elements={
+Corner=UDim.new(0,8),
+Stroke={
+Thickness=2.2,
+ApplyStrokeMode=Enum.ApplyStrokeMode.Border,
+ThemeTag={
+OBJECTS=aD,
+Color="Colors.Buttons.Default"
+}
+}
+}
+})
+
+local aK=E("TextLabel",aG,{
+Size=UDim2.new(1,-10,0,10),
+Position=UDim2.new(0,10,0.44,0),
+TextXAlignment=Enum.TextXAlignment.Left,
+BackgroundTransparency=1,
+TextSize=11,
+Text=aw,
+ThemeTag={
+OBJECTS=aD,
+TextColor3="Colors.Text.Default",
+Font="Font.Bold"
+}
+})
+
+local aL
+
+if aA or aB then
+aL=E("Frame",aG,{
+Size=UDim2.new(1,-10,0,9),
+Position=UDim2.new(0,0,0.52,0),
+BackgroundTransparency=1,
+Elements={
+Padding={
+PaddingLeft=UDim.new(0,7),
+PaddingRight=UDim.new(0,10)
+},
+ListLayout={
+HorizontalAlignment=Enum.HorizontalAlignment.Left,
+VerticalAlignment=Enum.VerticalAlignment.Center,
+FillDirection=Enum.FillDirection.Horizontal,
+Padding=UDim.new(0,4),
+}
+}
+})local aM=function(
+
+aM, aN)
+return E("Frame",aL,{
+Size=UDim2.fromScale(0,1),
+AutomaticSize=Enum.AutomaticSize.X,
+BackgroundTransparency=1,
+Childs={
+E("Frame",{
+Size=UDim2.fromOffset(3,3),
+Position=UDim2.new(0,5,0.5,0),
+AnchorPoint=Vector2.new(0,0.5),
+BackgroundColor3=aM,
+Elements={
+Corner=UDim.new(1,0)
+}
+}),
+E("TextLabel",{
+Size=UDim2.new(0,0,1,0),
+Position=UDim2.new(0,12,0.5,0),
+AnchorPoint=Vector2.new(0,0.5),
+AutomaticSize=Enum.AutomaticSize.X,
+BackgroundTransparency=1,
+TextSize=7,
+Text=aN,
+ThemeTag={
+OBJECTS=aD,
+TextColor3="Colors.Text.Darker",
+Font="Font.Normal"
+}
+})
+}
+})end
+
+
+if aA~=nil then
+aM(Color3.fromRGB(67,181,129),N(aA).." Online")
+end
+if aB~=nil then
+aM(Color3.fromRGB(86,101,105),N(aB).." Members")
+end
+end
+
+local aM=E("TextLabel",aG,{
+Size=UDim2.new(1,-50,0,8),
+Position=UDim2.new(0,10,aL and 0.6 or 0.56,0),
+TextXAlignment=Enum.TextXAlignment.Left,
+AutomaticSize=Enum.AutomaticSize.Y,
+BackgroundTransparency=1,
+TextSize=8,
+Text=ax or"",
+TextWrapped=true,
+ThemeTag={
+OBJECTS=aD,
+TextColor3="Colors.Text.Darker",
+Font="Font.Medium"
+}
+})
+
+local aN=E("Frame",aG,{
+Size=UDim2.new(1,0,0.28,0),
+Position=UDim2.fromScale(0,1),
+AnchorPoint=Vector2.new(0,1),
+BorderSizePixel=0,
+ThemeTag={
+OBJECTS=aD,
+BackgroundColor3="Colors.Buttons.Default"
+}
+})
+
+if#aM.Text>0 then
+aN.Size=UDim2.new(1,0,0.42,0)
+
+E("UIGradient",aN,{
+Rotation=-90,
+Transparency=NumberSequence.new{
+NumberSequenceKeypoint.new(0.00,0.00),
+NumberSequenceKeypoint.new(0.60,0.00),
+NumberSequenceKeypoint.new(1.00,1.00)
+}
+})
+end
+
+local aO=E("TextButton",aN,{
+Position=UDim2.new(0.5,0,1,-9),
+Size=UDim2.new(1,-18,0,18),
+AnchorPoint=Vector2.new(0.5,1),
+Text="Go to Server",
+Elements={
+Corner=UDim.new(0.5,0)
+},
+ThemeTag={
+OBJECTS=aD,
+BackgroundColor3="Colors.JoinButton",
+TextColor3="Colors.Text.Default",
+Font="Font.Bold"
+}
+})
+
+local aP=0
+
+u(aO.Activated,function()
+if(tick()-aP)<0 then return end
+
+aP=tick()+5
+local aQ=aO.Text
+aO.Text="Copied to your Clipboard!"
+if setclipboard then 
+pcall(setclipboard, aC)
+end
+task.wait(4)
+aO.Text=aQ
+end)
+
+if type(az)=="string"then
+aH.ScaleType=Enum.ScaleType.Crop
+aH.Image=az
+elseif typeof(az)=="Color3"then
+aH.BackgroundTransparency=0
+E("UIGradient",aH,{
+Rotation=-15,
+Color=ColorSequence.new{
+ColorSequenceKeypoint.new(0,az),
+ColorSequenceKeypoint.new(1,az:Lerp(Color3.new(1,1,1),0.2))
+}
+})
+end
+
+return setmetatable({
+DESTROY_ELEMENT=aF,
+VISIBLE_ELEMENT=aF,
+
+Title=aw,
+Description=ax,
+DESCRIPTION_LABEL=aM,
+TITLE_LABEL=aK,
+
+Kind="DiscordInvite",
+Parent=self
+},ai)
+end
+
+function ah:AddParagraph(av,aw)
+assert(type(av)=="string",`"Tab.AddParagraph[param 1]". 'string' expected, got {typeof(av)}`)
+
+if aw~=nil and type(aw)~="string"then
+error(`"Tab.AddParagraph[param 2]". 'string', or 'nil' expected, got {typeof(aw)}`,2)
+end
+
+local ax=V[self]
+local ay,az,aA=am(self,av,aw,UDim2.new(1,0,0,0))
+
+return setmetatable({
+DESTROY_ELEMENT=ay,
+VISIBLE_ELEMENT=ay,
+TITLE_LABEL=az,
+DESCRIPTION_LABEL=aA,
+
+Title=av,
+Description=aw,
+
+Parent=self,
+Kind="Paragraph"
+},ai)
+end
+
+function ah:AddDropdown(av)
+local aw,ax=an("Dropdown",av)
+local ay=ao("Dropdown",av[5]or av.Flag)
+
+local az=av[2]or av.Options
+local aA=av[3]or av.Default
+local aB=F(av[4]or av.Callback)
+local aC=av.MultiSelect
+
+if aA~=nil and type(aA)~="table"and type(aA)~="string"then
+error(`"Tab.AddDropdown.Default". 'string', 'table', or 'nil' expected, got {typeof(aA)}`,2)
+end
+
+if az~=nil and type(az)~="table"then
+error(`"Tab.AddDropdown.Options". 'table', or 'nil' expected, got {typeof(az)}`,2)
+end
+
+if aC~=nil and type(aC)~="boolean"then
+error(`"Tab.AddDropdown.MultiSelect". 'boolean', or 'nil' expected, got {typeof(aC)}`,2)
+end
+
+if ay and type(ae[ay])==(aC and"table"or"string")then
+aA=ae[ay]
+end
+
+local aD=V[self]
+local aE,aF,aG=am(self,aw,ax,UDim2.new(1,-150,0,0))
+
+local aH=E("Frame",aE,{
+Size=UDim2.new(0,150,0,18),
+Position=UDim2.new(1,-10,0.5),
+AnchorPoint=Vector2.new(1,0.5),
+Elements={
+Corner=UDim.new(0,4)
+},
+ThemeTag={
+OBJECTS=aD,
+BackgroundColor3="Colors.Stroke"
+}
+})
+
+local aI=E("TextLabel",aH,{
+Size=UDim2.new(0.85,0,0.85,0),
+AnchorPoint=Vector2.new(0.5,0.5),
+Position=UDim2.new(0.5,0,0.5,0),
+BackgroundTransparency=1,
+TextScaled=true,
+Text="...",
+ThemeTag={
+OBJECTS=aD,
+TextColor3="Colors.Text.Default",
+Font="Font.Bold"
+}
+})
+
+local aJ={
+OBJECTS=aD,
+Image="Icons.Dropdown.Open",
+ImageColor3="Colors.Icons"
+}
+
+local aK=E("ImageLabel",aH,{
+Size=UDim2.new(0,15,0,15),
+Position=UDim2.new(0,-5,0.5),
+AnchorPoint=Vector2.new(1,0.5),
+BackgroundTransparency=1,
+ThemeTag=aJ
+})
+
+local aL=ak.Dropdown.new(self,aE,aF,aG,aB)
+table.insert(SearchIndex,{Title=aw:lower():gsub("[%s%p%c]",""),Kind="dropdown",Tab=self,Frame=aE})
+
+local aM
+local aN=false
+local aO=false
+
+local aP={}
+local aQ={}
+local aR={}
+local aS={}
+
+aL.DROPDOWN_OPTIONS=aR
+aL.Opened=aO local aT=function(
+
+aT, aU)
+aJ.ImageColor3=aT
+aJ.Image=aU
+
+J(aK,"ImageColor3",w(s.CurrentTheme,aT),0.35):Play()
+aK.Image=w(s.CurrentTheme,aU)end local aU=function(
+
+
+aU)
+aO=aU
+aL.Opened=aU
+
+local aV=aU and"Colors.Primary"or"Colors.Icons"
+local aW=aU and"Icons.Dropdown.Close"or"Icons.Dropdown.Open"
+aT(aV,aW)end local aV=function()
+
+
+
+aU(false)end local aW=function()
+
+
+
+local aW={}
+for aX,aY in aQ do
+if not aY then continue end
+aW[#aW+1]=aX
+end
+return aW end local aX=function(
+
+
+aX)
+local aY=type(aX)=="table"and table.concat(aX,", ")or(aX or"")
+
+if#aY>=100 then
+aY=aY:sub(1,97).."..."
+end
+
+aI.Text=#aY~=0 and aY or"..."end local aY=function()
+
+
+
+aN=false
+
+local aY=aC and aW()or aM and aM.Name
+G(aB,aC and aQ or aY)
+aX(aY)
+
+if ay~=nil then
+ae[ay]=aY
+end end local aZ=function()
+
+
+
+if not aN then
+aN=true
+task.delay(0.1,aY)
+end end local a_=function(
+
+
+a_)
+if aC then
+local a0=not a_.Selected
+X.SetOptionValue(a_,a0)
+aQ[a_.Name]=a0
+else
+if aM==a_ then
+return nil
+elseif aM~=nil then
+X.SetOptionValue(aM,false)
+end
+
+aM=a_
+X.SetOptionValue(a_,true)
+end
+
+aZ()end local a0=function(
+
+
+a0)
+a0=tostring(a0)
+if aS[a0]then return end
+
+local a1={
+Name=a0,
+DisplayName=a0,
+Selected=false
+}
+
+if aC and aQ[a0]==nil then
+aQ[a0]=false
+end
+
+aS[a0]=a1
+aR[#aR+1]=a1
+return a1 end local a1=function(
+
+
+a1)
+if aO==a1 then return end
+
+if not X then
+X=ap()
+end
+
+if a1 then
+if not X.OpenDropdown(aV)then return end
+
+X.SetHolder(aH)
+X.SetMultiSelect(aC)
+X.SetOnClicked(a_)
+X.SetOptions(aR)
+else
+X.CloseDropdown()
+end
+
+aU(a1)end local a2=function(
+
+
+a2, a3)
+if a3 and type(a2)=="boolean"then
+return a2==true and aR[a3]
+end
+
+return if type(a2)=="number"then aR[a2]else aS[tostring(a2)]end local a3=function(
+
+
+a3)
+a3.Selected=true
+
+if aC then
+aQ[a3.Name]=true
+else
+aM=a3
+end end local a4=function(...)
+
+
+
+local a4=a2(...)
+
+if a4 then
+a3(a4)
+elseif aC and type(...)=="string"then
+aP[select(1,...)]=true
+end end local a5=function()
+
+
+
+if not aA then return end
+
+for a5=1,(aC and#aA or 1)do
+a4(aA[a5],a5)
+end end local a6=function(
+
+
+a6)
+local a7=table.find(aR,a6)
+
+if a7 then
+table.remove(aR,a7)
+end
+
+if a6.Instance then
+a6.Instance:Destroy()
+end
+
+aS[a6.Name]=nil end local a7=function(
+
+
+a7)
+if aC then
+local a8=a7.Name
+return(aQ[a8]or aP[a8])==true
+else
+return aM and aM.Name==a7.Name
+end end
+
+
+aL.ADD_DROPDOWN_OPTION=function(a8)
+if type(a8)=="table"then
+for a9=1,#a8 do
+aL:Add(a8[a9])
+end
+
+return nil
+end
+
+local a9=a0(a8)
+
+if a9 then
+if aL.Opened then
+X.CreateOptionTemplate(a9,true)
+end
+
+if a7(a9)then
+a3(a9)
+
+if a9.Instance then
+X.SetOptionValue(a9,a9.Selected)
+end
+end
+
+aZ()
+end
+end
+
+aL.REMOVE_DROPDOWN_OPTION=function(a8)
+local a9=aS[tostring(a8)]
+if a9 then
+a6(a9)
+end
+end
+
+aL.CLEAR_DROPDOWN=function()
+for a8=#aR,1,-1 do
+local a9=aR[a8]
+if a9.Instance then
+a9.Instance:Destroy()
+end
+
+aS[a9.Name]=nil
+aR[a8]=nil
+end
+
+if aL.Opened then
+X.Clear()
+end
+end
+
+do
+if az then
+for a8=1,#az do
+a0(az[a8])
+end
+end
+
+if type(aA)=="table"then
+a5()
+elseif type(aA)=="string"or type(aA)=="number"then
+local a8=a2(aA)
+
+if a8 then
+a3(a8)
+end
+end
+
+if aC then
+local a8=aW()
+task.defer(G,aB,aQ)
+aX(a8)
+else
+local a8=aM
+local a9=a8 and a8.Name or""
+task.defer(G,aB,a9)
+aX(a9)
+end
+end
+
+u(aE.Activated,function()
+a1(not aO)
+end)
+
+return aL
+end
+
+function ah:Destroy()
+assert(type(self)=="table"and self.IS_A_TAB,`"Tab.Destroy". {tostring(self)} is not a tab`)
+if self.IS_DESTROYED then return end
+local av=table.find(S,self)
+assert(av,`"Tab.Destroy". failed to destroy '{self.Title}'`)
+
+table.remove(S,av)
+
+for i = #SearchIndex, 1, -1 do
+    if SearchIndex[i].Tab == self then
+        table.remove(SearchIndex, i)
+    end
+end
+
+for aw,ax in T[self]do
+ax:Destroy()
+end
+
+V[self]:destroy()
+
+T[self]=nil
+V[self]=nil
+
+setmetatable(self,nil)
+end
+
+function ah:SetVisible(av)
+assert(type(av)=="boolean",`"Tab.SetVisible[param 1]". 'boolean' extected, got {typeof(av)}`)
+
+for aw,ax in T[self]do
+ax.Visible=av
+end
+end
+
+-- Chọn tab: LUÔN chỉ 1 tab hiển thị (đã bỏ chế độ chọn 2 tab)
+function ah:Select()
+local aw=self.Parent
+local ax=aw.SelectedTabs or{}
+
+if #ax==1 and ax[1]==self then
+return nil
+end
+
+for ay=#ax,1,-1 do
+local az=ax[ay]
+
+if az~=self then
+table.remove(ax,ay)
+U[az].Unselect()
+end
+end
+
+if #ax==0 then
+table.insert(ax,self)
+end
+
+ac=self
+U[self].Select()
+aw:RefreshSplit()
+end
+
+function ai:SetTitle(av)
+assert(type(av)=="string",`"Option.SetTitle". 'string' expected, got {typeof(av)}`)
+assert(self.TITLE_LABEL,`"Option.SetTitle". cannot change this option name {self.KIND}:{self.Title}`)
+
+self.TITLE_LABEL.Text=av
+self.Title=av
+return self
+end
+
+function ai:SetDescription(av)
+assert(av==nil or type(av)=="string",`"Option.SetDescription". 'string', or 'nil' expected, got {typeof(av)}`)
+assert(self.DESCRIPTION_LABEL,`"Option.SetDescription". cannot change this option description {self.KIND}:{self.Title}`)
+
+self.DESCRIPTION_LABEL.Text=av
+self.Description=av
+return self
+end
+
+function ai:SetVisible(av)
+assert(typeof(self.VISIBLE_ELEMENT)=="Instance",`"Option.SetVisible". cannot change this option visibility {self.KIND}:{self.Title}`)
+assert(type(av)=="boolean",`"Option.SetVisible". 'boolean' expected, got {typeof(av)}`)
+
+self.VISIBLE_ELEMENT.Visible=av
+end
+
+function ai:Destroy()
+    assert(typeof(self.DESTROY_ELEMENT)=="Instance",`"Option.Destroy". cannot destroy this option {self.KIND}:{self.Title}`)
+
+    for i = #SearchIndex, 1, -1 do
+        if SearchIndex[i].Frame == self.DESTROY_ELEMENT then
+            table.remove(SearchIndex, i)
+            break
+        end
+    end
+
+    self.DESTROY_ELEMENT:Destroy()
+    setmetatable(self,nil)
+    self.Destroyed=true
+end
+
+function ai:AddCallback(av)
+assert(self.CALLBACKS,"\"Option.AddCallback\". cannot add callback to this option.")
+assert(type(av)=="function",`"Option.AddCallback[param 1]". 'function' expected, got {typeof(av)}`)
+
+table.insert(self.CALLBACKS,av)
+return self
+end
+
+ai.NewCallback=ai.AddCallback
+ai.SetContent=ai.SetDescription
+ai.SetDesc=ai.SetDescription
+
+function aj:CreateMobileMinimizer(av)
+-- Quầng sáng mềm phía sau viên bi (tạo trước để nằm dưới nút)
+local aH=E("Frame","MobileMinimizerGlow",I,{
+Size=UDim2.fromOffset(62,62),
+Position=UDim2.fromScale(0.17,0.28),
+AnchorPoint=Vector2.new(0.5,0.5),
+BackgroundColor3=Color3.fromRGB(126,255,182),
+BackgroundTransparency=0.5,
+BorderSizePixel=0,
+ZIndex=0,
+Elements={
+Corner=UDim.new(1,0),
+Gradient={
+Rotation=90,
+ThemeTag={Color="Glass.LineGradient",Transparency="Glass.LineTransparency"}
+}
+}
+})
+
+-- Viên bi TRÒN LIQUID GLASS: nút đóng/mở UI nổi trên màn hình (kéo được)
+local aw=E("ImageButton","MobileMinimizer",I,{
+Size=UDim2.fromOffset(46,46),
+Position=UDim2.fromScale(0.17,0.28),
+AnchorPoint=Vector2.new(0.5,0.5),
+AutoButtonColor=false,
+BackgroundColor3=Color3.fromRGB(120,255,180),
+BackgroundTransparency=0.45,
+ScaleType=Enum.ScaleType.Fit,
+ZIndex=1,
+Elements={
+Corner=UDim.new(1,0),
+Padding={
+PaddingLeft=UDim.new(0,9),
+PaddingRight=UDim.new(0,9),
+PaddingTop=UDim.new(0,9),
+PaddingBottom=UDim.new(0,9)
+},
+Gradient={
+Rotation=90,
+ThemeTag={Color="Glass.TabSheen"}
+},
+Stroke={
+ThemeTag={Color="Glass.Neon"},
+Thickness=1.5,
+Transparency=0.2
+}
+},
+Childs={
+E("Frame","Sheen",{
+Size=UDim2.new(1,-10,0,15),
+Position=UDim2.new(0,5,0,4),
+BackgroundColor3=Color3.fromRGB(255,255,255),
+BackgroundTransparency=0.35,
+BorderSizePixel=0,
+Elements={
+Corner=UDim.new(1,0),
+Gradient={
+Rotation=90,
+ThemeTag={Color="Glass.Sheen",Transparency="Glass.SheenTransparency"}
+}
+}
+})
+}
+})
+
+u(aw.Activated,function()
+ag:Minimize()
+end)
+
+-- halo bám theo viên bi khi kéo + nhuộm theo màu BackgroundColor3 người dùng truyền
+u(aw:GetPropertyChangedSignal("Position"),function()
+aH.Position=aw.Position
+end)
+u(aw:GetPropertyChangedSignal("BackgroundColor3"),function()
+aH.BackgroundColor3=aw.BackgroundColor3
+end)
+
+-- halo "thở": mờ rồi sáng tuần hoàn bằng 1 tween lặp, không tốn thread
+local aP=j:Create(aH,TweenInfo.new(1.8,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true),{
+BackgroundTransparency=0.72
+})
+aP:Play()
+
+av.Elements={}
+
+if av.Corner then
+local aQ=aw:FindFirstChildOfClass("UICorner")
+if aQ then
+aQ.CornerRadius=av.Corner
+else
+av.Elements.Corner=av.Corner
+end
+av.Corner=nil
+end
+
+if av.Stroke then
+local aQ=aw:FindFirstChildOfClass("UIStroke")
+if aQ then
+D.SetProperties(aQ,av.Stroke)
+else
+av.Elements.Stroke=av.Stroke
+end
+av.Stroke=nil
+end
+
+D.Draggable(aw,ad,0.5)
+D.SetProperties(aw,av)
+aH.Position=aw.Position
+aH.BackgroundColor3=aw.BackgroundColor3
+
+return aw
+end
+
+function aj:SetKeyCode(av)
+assert(au(av),`"Minimizer.SetKeyCode[param 1]". 'KeyCode' expected, got {typeof(av)}`)
+
+self.KeyCode=av
+end
+
+function ag:SelectTab(av)
+local aw=type(av)=="number"and S[av]
+
+if type(av)=="table"and av.IS_A_TAB then
+aw=av
+end
+
+if aw then
+aw:Select()
+elseif not aw then
+assert(type(av)=="number",`"Window.SelectTab" number or tab expected, got {typeof(av)}`)
+assert(av>0,`"Window.SelectTab" the number must be greater than 0, value: {av}`)
+assert(av==math.floor(av),`"Winow.SelectTab" floor number expected, got {av}`)
+
+self.SelectedTab=av
+end
+end
+
+function ag:Minimize()
+ab.Visible=not ab.Visible
+end
+
+-- Mỗi lúc chỉ 1 container tab được hiển thị, luôn full panel
+function ag:RefreshSplit()
+local aw=self.SelectedTabs or{}
+local ay=self:GetElements().ContainerHolder
+
+for az=1,#aw do
+local aA=aw[az]
+local aB=T[aA]and T[aA].Container
+
+if aB then
+aB.Parent=ay
+aB.AnchorPoint=Vector2.new(0,0)
+aB.Position=UDim2.new(0,0,0,0)
+aB.Size=UDim2.new(1,0,1,0)
+end
+end
+end
+
+function ag:MakeTab(av)
+local aw=av[1]or av.Name or av.Title
+local ax=av[2]or av.Icon or av.Image
+
+assert(type(aw)=="string",`"Tab.Title" 'string' expected, got {typeof(aw)}`)
+assert(ax==nil or type(ax)=="string",`"Tab.Icon" 'string' expected, got {typeof(ax)}`)
+
+local ay=setmetatable({
+Selected=self.SelectedTab==#S+1,
+Icon=s:GetIconByName(ax),
+Title=aw,
+
+Parent=self,
+IS_A_TAB=true
+},ah)
+
+local az=self:GetElements()
+local aA=az.TabsContainer
+local aB=az.ContainerHolder
+
+local aC,aD,aE=al(self,ay,aA)
+
+local aH=0.45
+
+local aI={
+J(aE,"BackgroundTransparency",0,aH)
+}
+
+local aJ={
+J(aE,"BackgroundTransparency",1,aH)
+}
+
+local aK=C:new()
+V[ay]=aK local aL=function(
+
+aL)
+for aM=1,#aL do
+aL[aM]:Play()
+end end local aM=function()
+
+
+aL(aI)
+J(aC,"BackgroundTransparency",0.32,aH):Play()
+ay.Selected=true
+aK:changeRendering(true)
+aK:update()
+aD.Parent=aB
+end local aN=function()
+
+
+
+aL(aJ)
+J(aC,"BackgroundTransparency",1,aH):Play()
+ay.Selected=false
+aD.Parent=nil
+aK:changeRendering(false)end
+
+
+U[ay]=table.freeze{
+Unselect=aN,
+Select=aM
+}
+
+T[ay]=table.freeze{
+SelectTabButton=aC,
+Container=aD
+}
+
+table.insert(S,ay)
+
+u(aC.Activated,function()
+ay:Select()
+end)
+
+if ay.Selected then
+ay:Select()
+end
+
+return ay
+end
+
+function ag:StartWindow(av)
+local aw=av.MinimizeButton
+local ax=av.MainFrame
+local ay=av.Resizers
+local az=av.TopBar
+
+local aA=av.SubTitle
+local aB=av.Title
+
+Y=av.Dropdowns
+ab=av.MainFrame
+ad=av.UIScale
+ae=av.Flags
+
+local aC=ax.Size
+local aD=0
+
+function ag:MinimizeButton()
+if(tick()-aD)<0 then
+return false
+end
+
+if self.Minimized then
+aw.Image="rbxassetid://10734896206"
+J(ax,"Size",aC,0.25):Play()
+else
+aC=ax.Size
+aw.Image="rbxassetid://10734924532"
+J(ax,"Size",UDim2.fromOffset(ax.Size.X.Offset,az.Size.Y.Offset),0.25):Play()
+end
+
+for aE,aF in ay do
+aF.Visible=self.Minimized
+end
+
+self.Minimized=not self.Minimized
+aD=tick()+0.5
+
+return true
+end
+
+function ag:GetTitle()
+return aB.Text
+end
+
+function ag:GetSubTitle()
+return aA.Text
+end
+
+function ag:SetTitle(aE)
+assert(type(aE)=="string",`"Window.SetTitle". 'string' expected, got {typeof(aE)}`)
+assert(#aE>0,"\"Window.SetTitle\". the new 'Title' is too short.")
+
+aB.Text=aE
+end
+
+function ag:SetSubTitle(aE)
+assert(type(aE)=="string",`"Window.SetSubTitle". 'string' expected, got {typeof(aE)}`)
+assert(#aE>0,"\"Window.SetSubTitle\". the new 'SubTitle' is too short.")
+
+aA.Text=aE
+end
+
+W=E("Frame",I,{
+Size=UDim2.new(0,280,1,0),
+Position=UDim2.fromScale(1,0),
+AnchorPoint=Vector2.new(1,0),
+BackgroundTransparency=1,
+Elements={
+Padding={
+PaddingBottom=UDim.new(0,20)
+},
+ListLayout={
+HorizontalAlignment=Enum.HorizontalAlignment.Center,
+VerticalAlignment=Enum.VerticalAlignment.Bottom,
+SortOrder=Enum.SortOrder.LayoutOrder,
+Padding=UDim.new(0,20)
+}
+}
+})
+
+aa=E("TextButton","OutBox",{
+Size=UDim2.fromScale(1,1),
+BackgroundTransparency=0.35,
+AutoButtonColor=false,
+Text="",
+ThemeTag={
+BackgroundColor3="Glass.Scrim"
+},
+Childs={
+ax:FindFirstChildOfClass"UICorner":Clone(),
+E("Frame","Template",{
+Size=UDim2.new(0.35,60,0.20,80),
+Position=UDim2.fromScale(0.5,0.5),
+AnchorPoint=Vector2.new(0.5,0.5),
+Active=true,
+BackgroundColor3=Color3.new(1,1,1),
+BackgroundTransparency=0.06,
+Elements={
+Corner=UDim.new(0,14),
+Stroke={
+ThemeTag={Color="Glass.Edge"},
+Thickness=1.5,
+Transparency=0.22
+},
+Gradient={
+Rotation=125,
+ThemeTag={
+Color="Glass.Panel"
+}
+}
+},
+Childs={
+-- Lớp bóng loáng liquid glass cho dialog
+E("Frame","GlassSheen",{
+Size=UDim2.fromScale(1,1),
+BackgroundColor3=Color3.fromRGB(230,255,242),
+BorderSizePixel=0,
+ZIndex=0,
+Elements={
+Gradient={
+Rotation=118,
+ThemeTag={Color="Glass.Sheen",Transparency="Glass.SheenTransparency"}
+}
+}
+}),
+E("TextLabel","Title",{
+Size=UDim2.new(1,-20,0,20),
+TextTruncate=Enum.TextTruncate.AtEnd,
+TextSize=15,
+Position=UDim2.new(0.5,0,0,28),
+AnchorPoint=Vector2.new(0.5,0),
+BackgroundTransparency=1,
+ThemeTag={
+Font="Font.ExtraBold",
+TextColor3="Colors.Text.Default"
+}
+}),
+E("TextLabel","Description",{
+Position=UDim2.new(0.5,0,0,46),
+Size=UDim2.new(1,-20,0,0),
+AnchorPoint=Vector2.new(0.5,0),
+TextWrapped=true,
+TextSize=11,
+AutomaticSize=Enum.AutomaticSize.Y,
+BackgroundTransparency=1,
+ThemeTag={
+TextColor3="Colors.Text.Darker",
+Font="Font.Medium"
+}
+}),
+E("Frame","Options",{
+Size=UDim2.new(1,-20,0.15,18),
+Position=UDim2.new(0.5,0,1,-10),
+AnchorPoint=Vector2.new(0.5,1),
+BackgroundTransparency=1,
+Elements={
+Padding={
+PaddingLeft=UDim.new(0,10),
+PaddingRight=UDim.new(0,10),
+PaddingBottom=UDim.new(0,30),
+PaddingTop=UDim.new(0,30)
+},
+ListLayout={
+HorizontalAlignment=Enum.HorizontalAlignment.Right,
+VerticalAlignment=Enum.VerticalAlignment.Center,
+FillDirection=Enum.FillDirection.Horizontal
+}
+}
+})
+}
+})
+}
+})
+
+aa.Template:SetAttribute("OriginalSize",aa.Template.Size)
+
+u(aa.Activated,function()
+if Z~=nil and not Z.Closing and not Z.Closed then
+Z:Close()
+end
+end)
+
+ag.StartWindow=nil
+end
+
+function ag:DeleteFlags()
+return ae()
+end
+
+function ag:SetFlag(av,aw)
+assert(type(av)=="string",`"Window.SetFlag[param 1]". 'string' expected, got {typeof(av)}`)
+
+if at[typeof(aw)]~=true then
+local ax={}
+
+for ay,az in at do
+table.insert(ax,ay)
+end
+
+return error(`"Window.SetFlag[param 2]". '{table.concat(ax,"', '")}' expected, got {typeof(aw)}`,2)
+end
+
+ae[av]=aw
+end
+
+function ag:GetFlag(av)
+return ae[av]
+end
+
+function ag:ReadFile(av)
+assert(type(av)=="string",`"Window.ReadFile[param 1]". 'string' expected, got {typeof(av)}`)
+av=`{self.ScriptFolder}/{av}`
+
+if f~=nil and(isfile==nil or not isfile(av))then
+return f(av)
+end
+end
+
+function ag:WriteFile(av,aw)
+assert(type(av)=="string",`"Window.WriteFile[param 1]". 'string' expected, got {typeof(av)}`)
+av=`{self.ScriptFolder}/{av}`
+
+if aw~=nil and type(aw)~="string"then
+error(`"Window.WriteFile[param 2]". 'string', or 'nil' expected, got {typeof(aw)}`,2)
+end
+
+if aw==nil then
+if c~=nil then
+c(`{self.ScriptFolder}/{av}`)
+return true
+end
+else
+if e~=nil then
+z(`{self.ScriptFolder}/{av}`)
+return true
+end
+end
+
+return false
+end
+
+function ag:NewMinimizer(av)
+local aw=type(av)=="table"and(av[1]or av.KeyCode)or av
+
+if not au(aw)then
+error(`"Window.NewMinimizer.KeyCode". 'KeyCode' expected, got {typeof(aw)}`,2)
+end
+
+local ax=setmetatable({
+KeyCode=aw
+},aj)
+
+u(i.InputBegan,function(ay)
+if ay.KeyCode==ax.KeyCode then
+ag:Minimize()
+end
+end)
+
+return ax
+end
+
+function ag:Dialog(av)
+if self.Minimized then
+while not self:MinimizeButton()do task.wait()end
+end
+
+if Z then
+Z:Close(true)
+end
+
+local aw=av.Title or av.Name
+local ax=av.Content or av.Description
+local ay=av.Options
+
+assert(type(aw)=="string",`"Window.Dialog.Title". 'string' expected, got {typeof(aw)}`)
+assert(type(ax)=="string",`"Window.Dialog.Content". 'string' expected, got {typeof(ax)}`)
+assert(type(ay)=="table",`"Window.Dialog.Options". 'table' expected, got {typeof(ay)}`)
+assert(#ay>0,"\"Window.Dialog.Options\". requires one or more options.")local az=function()
+
+
+local az=aa.Template
+local aA=az.Description
+local aB=az.Title
+
+local aC=az:GetAttribute"OriginalSize"
+local aD=UDim2.new(aC.X.Scale*1.2,aC.X.Offset,aC.Y.Scale*1.2,aC.Y.Offset)
+
+az.Size=aD
+aa.Parent=ab
+aA.Text=ax
+aB.Text=aw
+
+J(az,"Size",aC,0.3):Play()
+
+local aE=ak.Dialog.new(aA,aB)
+aE.NEW_SIZE=aD
+aE.TEMPLATE=az
+
+for aF,aG in az.Options:GetChildren()do
+if aG:IsA"GuiObject"then
+aG:Destroy()
+end
+end
+
+for aF=#ay,1,-1 do
+aE:NewOption(ay[aF])
+end
+
+return aE end
+
+
+Z=az()
+return Z
+end
+
+function ag:SetNotifyDefaultIcon(av)
+assert(type(av)=="string",`"Window.SetNotifyDefaultIcon[param 1]". 'string' expected, got {typeof(av)}`)
+
+af=av
+end
+
+function ag:Notify(av)
+if type(av)~="table"then
+av={}
+end
+
+local aw=av[1]or av.Name or av.Title
+local ax=av[2]or av.Content
+local ay=av[3]or av.Icon or av.Image
+local az=av[4]or av.Duration or av.Countdown or av.Time
+
+if self.NOTIFICATION_GROUP then
+if az==nil then az=self.Duration end
+if ax==nil then ax=self.Content end
+if aw==nil then aw=self.Title end
+if ay==nil then ay=self.Icon end
+end
+
+assert(type(aw)=="string",`"Window.Notify.Title". 'string' expected, got {typeof(aw)}`)
+assert(type(ax)=="string",`"Window.Notify.Content". 'string' expected, got {typeof(aw)}`)
+assert(ay==nil or type(ay)=="string",`"Window.Notify.Icon". 'nil' or 'string' expected, got {typeof(ay)}`)
+
+if az~=nil and type(az)~="number"then
+error(`"Window.Notify.Time". 'number', or 'nil' expected, got {typeof(az)}`,2)
+elseif az==nil then
+az=5
+end
+
+local aA=E("Frame","Notification",W,{
+Size=UDim2.new(0.85,0,0,60),
+BackgroundTransparency=1,
+AutomaticSize=Enum.AutomaticSize.Y
+})
+
+local aB=E("TextButton",aA,{
+AutomaticSize=Enum.AutomaticSize.Y,
+Size=UDim2.fromScale(1,1),
+AutoButtonColor=false,
+Text="",
+BackgroundColor3=Color3.new(1,1,1),
+BackgroundTransparency=0.06,
+Elements={
+Corner=UDim.new(0,10),
+Stroke={
+ThemeTag={Color="Glass.Edge"},
+Thickness=1,
+Transparency=0.35
+},
+Gradient={
+Rotation=125,
+ThemeTag={
+Color="Glass.Panel"
+}
+}
+}
+})
+
+local aC=E("UIScale",aA)
+
+local aD=E("Frame","Holder",aB,{
+AutomaticSize=Enum.AutomaticSize.Y,
+BackgroundTransparency=1,
+Size=UDim2.fromScale(1,1),
+Elements={
+ListLayout={
+SortOrder=Enum.SortOrder.LayoutOrder,
+VerticalAlignment=Enum.VerticalAlignment.Center,
+Padding=UDim.new(0,4)
+},
+Padding={
+PaddingBottom=UDim.new(0,8),
+PaddingTop=UDim.new(0,8),
+PaddingLeft=UDim.new(0,40)
+}
+}
+})
+
+local aE=E("TextLabel",aD,{
+Size=UDim2.new(1,0,0,20),
+TextTruncate=Enum.TextTruncate.AtEnd,
+TextXAlignment=Enum.TextXAlignment.Left,
+TextYAlignment=Enum.TextYAlignment.Bottom,
+BackgroundTransparency=1,
+TextSize=14,
+ThemeTag={
+TextColor3="Colors.Text.Default",
+Font="Font.Bold"
+}
+})
+
+local aF=E("TextLabel",aD,{
+Size=UDim2.new(1,0,0,20),
+TextXAlignment=Enum.TextXAlignment.Left,
+TextYAlignment=Enum.TextYAlignment.Top,
+AutomaticSize=Enum.AutomaticSize.Y,
+BackgroundTransparency=1,
+TextWrapped=true,
+TextSize=12,
+ThemeTag={
+TextColor3="Colors.Text.Dark",
+Font="Font.Normal"
+}
+})
+
+local aG=E("ImageLabel",aB,{
+Size=UDim2.fromOffset(24,24),
+Position=UDim2.new(0,8,0.5,0),
+AnchorPoint=Vector2.new(0,0.5),
+BackgroundTransparency=1,
+ThemeTag={
+ImageColor3="Colors.Icons"
+}
+})
+
+local aH=E("TextLabel",aB,{
+Size=UDim2.new(0,40,0,16),
+Position=UDim2.new(1,-10,0,8),
+AnchorPoint=Vector2.new(1,0),
+BackgroundTransparency=1,
+TextSize=10,
+ThemeTag={
+TextColor3="Colors.Text.Darker",
+Font="Font.Normal"
+}
+})
+
+local aI=false
+
+local aJ=J(aC,"Scale",1.22,0.35)
+local aK=J(aC,"Scale",1.00,0.35)
+
+local aL=setmetatable({
+TITLE_LABEL=aE,
+DESCRIPTION_LABEL=aF,
+VISIBLE_ELEMENT=aA,
+DESTROY_ELEMENT=aA,
+NOTIFICATION=aB,
+
+Kind="Notification",
+Closed=false,
+Parent=self
+},ai)
+
+function aL:Close()
+if self.Closed==true then return end
+
+self:Destroy()
+self.Closed=true
+
+local aM=J(aB,"Position",UDim2.fromScale(3,0),0.8)
+aM:Play()
+aM.Completed:Wait()
+aA:Destroy()
+end local aM=function()
+
+
+ay=s:GetIconByName(ay or af)
+aG.Image=ay
+
+if not O(ay)then
+aG.Visible=false
+aD.UIPadding.PaddingLeft=UDim.new(0,15)
+end
+
+aB.Position=UDim2.fromScale(3,0)
+J(aB,"Position",UDim2.fromScale(0,0),0.35):Play()
+
+aE.Text=aw
+aF.Text=ax
+
+local aM=aB.MouseLeave
+
+while az>0 do
+aH.Text=Q(az)
+if aI==true then aM:Wait()end
+az-=task.wait()
+end
+
+aL:Close()end
+
+
+u(aB.MouseButton1Down,function()aJ:Play()aI=true end)
+u(aB.MouseLeave,function()aK:Play()aI=false end)
+
+task.defer(aM)
+
+return aL
+end
+
+function ag:NewNotifyGroup(av)
+local aw=av[1]or av.Name or av.Title
+local ax=av[2]or av.Content
+local ay=av[3]or av.Icon or av.Image
+local az=av[4]or av.Duration or av.Countdown or av.Time
+
+if aw~=nil and type(aw)~="string"then
+error(`"Window.NewNotifyGroup.Title". 'string', or 'nil' expected, got {typeof(aw)}`,2)
+end
+
+if ax~=nil and type(ax)~="string"then
+error(`"Window.NewNotifyGroup.Content". 'string', or 'nil' expected, got {typeof(ax)}`,2)
+end
+
+if ay~=nil and type(ay)~="string"then
+error(`"Window.NewNotifyGroup.Icon". 'string', or 'nil' expected, got {typeof(ay)}`,2)
+end
+
+if az~=nil and type(az)~="number"then
+error(`"Window.NewNotifyGroup.Time". 'number', or 'nil' expected, got {typeof(az)}`,2)
+end
+
+return{
+NOTIFICATION_GROUP=true,
+Notify=ag.Notify,
+
+Duration=az,
+Content=ax,
+Title=aw,
+Icon=ay,
+}
+end
+
+function ag:GetTabByTitle(av)
+assert(type(av)=="string",`"Window.GetTabByTitle[param 1]". 'string' expected, got {typeof(av)}`)
+
+for aw=1,#S do
+if S[aw].Title==av then
+return S[aw]
+end
+end
+end
+
+ag.NewNotificationGroup=ag.NewNotifyGroup
+ag.SetDefaultNotifyIcon = ag.SetNotifyDefaultIcon
+ag.GetTabByName=ag.GetTabByTitle
+ag.Notificafion=ag.Notify
+
+function ag:PerformSearch(query)
+    local q = query:lower():gsub("[%s%p%c]","")
+
+    if q == "" then
+        for _,item in SearchIndex do
+            if item.searchHidden then
+                item.Frame.Visible = true
+                item.searchHidden = false
             end
-            __why = "library tai duoc (" .. #__src .. "b) nhung chay loi: " .. tostring(__okr and "tra ve nil" or __res)
+        end
+        for _,tab in S do
+            if tabHiddenState[tab] then
+                T[tab].SelectTabButton.Visible = true
+               tabHiddenState[tab] = nil
+            end
+        end
+        return
+    end
+
+    local tabHasMatch = {}
+    local sectionHasMatch = {} 
+    local elementMatches = {}
+    local currentSectionPerTab = {}
+
+    -- BƯỚC 1: Quét toàn bộ để tìm các phần tử khớp và đánh dấu Section của chúng
+    for _,item in SearchIndex do
+        if item.IsSection then
+            -- Lưu lại Section gần nhất của Tab này để gán cho các item bên dưới
+            currentSectionPerTab[item.Tab] = item
+            
+            -- Nếu bản thân tên Section khớp với từ khóa tìm kiếm
+            local matched = item.Title:find(q,1,true) ~= nil
+            if matched then
+                elementMatches[item] = true
+                tabHasMatch[item.Tab] = true
+                sectionHasMatch[item] = true
+            end
+        else
+            -- Logic tìm kiếm bình thường cho Toggle, Button, Slider...
+            local matched = item.Title:find(q,1,true) ~= nil
+                         or item.Kind:find(q,1,true) ~= nil
+            
+            if matched then
+                elementMatches[item] = true
+                tabHasMatch[item.Tab] = true
+                
+                -- Đánh dấu Section chứa item này là có kết quả, cần được hiển thị
+                local parentSection = currentSectionPerTab[item.Tab]
+                if parentSection then
+                    sectionHasMatch[parentSection] = true
+                end
+            end
         end
     end
-    __DIO_libErrs[#__DIO_libErrs + 1] = "[" .. __host .. "] " .. __why
+
+    -- BƯỚC 2: Cập nhật trạng thái Ẩn/Hiện dựa vào kết quả quét ở Bước 1
+    for _,item in SearchIndex do
+        local shouldBeVisible = false
+        
+        if item.IsSection then
+            -- Section chỉ hiện nếu bản thân nó khớp từ khóa HOẶC có con khớp từ khóa
+            shouldBeVisible = sectionHasMatch[item] == true
+        else
+            -- Phần tử bình thường hiện nếu bản thân nó khớp
+            shouldBeVisible = elementMatches[item] == true
+        end
+
+        if shouldBeVisible then
+            if item.searchHidden or not item.Frame.Visible then
+                item.Frame.Visible = true
+                item.searchHidden = false
+            end
+        else
+            if not item.searchHidden or item.Frame.Visible then
+                item.Frame.Visible = false
+                item.searchHidden = true
+            end
+        end
+    end
+
+    -- Ẩn/hiện nút tab bên trái
+    local firstVisible = nil
+    for _,tab in S do
+        local visible = tabHasMatch[tab] == true
+        local btn = T[tab].SelectTabButton
+        if not visible and btn.Visible then
+            btn.Visible = false
+            tabHiddenState[tab] = true
+        elseif visible and tabHiddenState[tab] then
+            btn.Visible = true
+            tabHiddenState[tab] = nil
+        end
+        if visible and not firstVisible then
+            firstVisible = tab
+        end
+    end
+
+    if ac and not tabHasMatch[ac] and firstVisible then
+        firstVisible:Select()
+    end
 end
-__DIO_libErr = table.concat(__DIO_libErrs, "\n")
+
+R.Window=ag
+end local aa=function(
+ 
+aa, ab)
+local ac=ab.Size.Y.Offset
+-- Bề ngang sidebar tab (lưu trong LibrarySettings.json, mặc định 160)
+local aT=(aa~=nil and type(aa.SidebarWidth)=="number")and math.clamp(aa.SidebarWidth,120,240)or 160
+
+local ad=UDim2.new(0,aT,1,-ac)
+local ae=UDim2.new(1,-(aT+12),1,-(ac+12))
+
+-- Danh sách tab: cột dọc bên trái, cuộn được
+local af=E("ScrollingFrame","TabsScroll",{
+AutomaticCanvasSize=Enum.AutomaticSize.Y,
+ScrollingDirection=Enum.ScrollingDirection.Y,
+Position=UDim2.new(0,0,0,ac),
+ScrollBarThickness=2,
+BackgroundColor3=Color3.fromRGB(120,255,180),
+BackgroundTransparency=0.93,
+ScrollBarImageTransparency=0.2,
+CanvasSize=UDim2.new(),
+BorderSizePixel=0,
+Size=ad,
+ThemeTag={
+ScrollBarImageColor3="Glass.Neon"
+},
+Elements={
+Padding={
+PaddingLeft=UDim.new(0,8),
+PaddingRight=UDim.new(0,8),
+PaddingTop=UDim.new(0,8),
+PaddingBottom=UDim.new(0,8)
+},
+ListLayout={
+FillDirection=Enum.FillDirection.Vertical,
+HorizontalAlignment=Enum.HorizontalAlignment.Left,
+VerticalAlignment=Enum.VerticalAlignment.Top,
+SortOrder=Enum.SortOrder.LayoutOrder,
+Padding=UDim.new(0,4)
+}
+}
+})
+
+-- Panel nội dung bên phải
+local ag=E("Frame","Containers",{
+Size=ae,
+Position=UDim2.new(0,aT+6,0,ac+6),
+BackgroundColor3=Color3.fromRGB(150,255,200),
+BackgroundTransparency=0.945,
+ClipsDescendants=true,
+Elements={
+Corner=UDim.new(0,8)
+}
+})
+
+return af,ag end
+
+
+function s:GetIconByName(ab)
+if ab==nil then return end
+assert(ab,`"Library.GetIconByName". 'string' expected, got {typeof(ab)}`)
+
+if O(ab)or#ab==0 then
+return ab
+end
+
+local ac=M(ab)
+
+if self.Icons[ac]then
+return"rbxassetid://"..self.Icons[ac]
+end
+
+for ad,ae in self.Icons do
+if ad:find(ac,1,true)then
+return"rbxassetid://"..ae
+end
+end
+end
+
+function s:IsValidTheme(ab)
+assert(type(ab)=="string",`"Library.IsValidTheme". string extected, got {typeof(ab)}`)
+
+return self.Themes[ab]~=nil
+end
+
+function s:GetThemes()
+local ab={}
+for ac,ad in self.Themes do
+table.insert(ab,ac)
+end
+return ab
+end
+
+function s:GetTheme(ab)
+assert(ab==nil or type(ab)=="string",`"Library.GetTheme". 'string' expected, got {typeof(ab)}`)
+
+if ab==nil then
+return self.CurrentTheme
+end
+
+local ac=self.Themes[ab]
+assert(ac~=nil,`"Library.GetTheme". theme not found: {ab}`)
+return ac
+end
+
+function s:SetTheme(ab)
+assert(type(ab)=="string",`"Library.SetTheme". string extected, got {typeof(ab)}`)
+local ac=self.Themes[ab]
+assert(ac,`"Library.SetTheme". theme not found: {ab}`)
+
+self.CurrentTheme=ac
+self.WindowSettings.SelectedTheme=ac.Name
+
+C:update()
+end
+
+function s:SetUIScale(ab)
+local ac=B.MIN_SCALE
+local ad=B.MAX_SCALE
+
+assert(type(ab)=="number",`"Library.SetUIScale". 'number' expected, got {typeof(ab)}`)
+assert(ab>=ac and ab<=ad,`"Library.SetUIScale". Min Scale: {ac}, Max Scale: {ad}`)
+
+I.Scale.Scale=P(ab)
+end
+
+function s:GetMaxScale()
+return B.MAX_SCALE
+end
+
+function s:GetMinScale()
+return B.MIN_SCALE
+end
+
+function s:GetCurrentTheme()
+if not self.LOADED_UI_LIBRARY then
+return error("failed to get current theme: UI is not loaded",2)
+end
+return self.CurrentTheme
+end
+
+function s:Destroy()
+for ab,ac in self.Connections do
+ac:Disconnect()
+end
+
+if I and I:GetAttribute"UID"==self.SCREENGUI_UID then
+pcall(I.Destroy,I)
+end
+end
+
+function s:MakeWindow(ab)
+if self.LOADED_UI_LIBRARY then
+return error("you can create only 1 Window",2)
+end
+
+local ac=math.random()
+I:SetAttribute("UID",ac)
+self.SCREENGUI_UID=ac
+I:ClearAllChildren()
+
+local ad=E("UIScale","Scale",I,{
+Scale=P(1)
+})
+
+local ae={
+Title=ab[1]or ab.Name or ab.Title,
+SubTitle=ab[2]or ab.SubName or ab.SubTitle,
+ScriptFolder=ab[3]or ab.ScriptFolder or ab.FolderName
+}
+
+assert(type(ae.Title)=="string",`"Window.Title". 'string' expected, got {typeof(ae.Title)}`)
+assert(type(ae.SubTitle)=="string",`"Window.SubTitle". 'string' expected, got {typeof(ae.SubTitle)}`)
+
+if ae.ScriptFolder~=nil and type(ae.ScriptFolder)~="string"then
+return error(`"Window.ScriptFolder". 'string', or nil expected, got {typeof(ae.ScriptFolder)}`,2)
+end
+
+if ae.ScriptFolder~=nil and string.find(ae.ScriptFolder,"/")then
+return error("\"Window.ScriptFolder\" is not valid, unexpected char \"/\"",2)
+end
+
+local af=(function()
+local af=ae.ScriptFolder
+local ag=false
+
+local ah,ai=pcall(function()
+return af and k:JSONDecode(f(`{af}/LibrarySettings.json`))
+end)
+
+if type(ai)~="table"then
+ai={}
+end local aj=function()
+
+
+ag=false
+
+return pcall(function()
+return z(`{af}/LibrarySettings.json`,k:JSONEncode(ai))
+end)end local ak=function(
+
+
+ak, al, am)
+rawset(ai,al,am)
+
+if af and not ag then
+ag=true
+task.delay(0.5,aj)
+end end
+
+
+return setmetatable({},{
+__newindex=ak,
+__index=ai
+})
+end)()
+
+local ag=(function()
+local ag=ae.ScriptFolder
+local ah=false
+
+local ai,aj=pcall(function()
+return ag and k:JSONDecode(f(`{ag}/ScriptFlags.json`))
+end)
+
+if type(aj)~="table"then
+aj={}
+end local ak=function()
+
+
+ah=false
+
+return pcall(function()
+z(`{ag}/ScriptFlags.json`,k:JSONEncode(aj))
+end)end local al=function(
+
+
+al, am, an)
+rawset(aj,am,an)
+
+if ag and not ah then
+ah=true
+task.delay(0.5,ak)
+end end local am=function()
+
+
+
+table.clear(aj)
+return pcall(function()
+return ag and c(`{ag}/ScriptFlags.json`)
+end)end
+
+
+return setmetatable({},{
+__newindex=al,
+__call=am,
+__index=aj
+})
+end)()
+
+self.ThemesObjects=C
+self.WindowSettings=af
+self.Flags=ag
+
+self.Icons=(function()
+local ah=ae.ScriptFolder
+
+local ai,aj=pcall(function()
+return loadstring(f(`{ah}/Icons.lua`))()
+end)
+
+if ai and type(aj)=="table"then
+return aj
+end
+
+local ak=`https://raw.githubusercontent.com/{self.Information.GitHubOwner}`
+local al=`{ak}/Library/refs/heads/main/redz-V5-remake/Utils/Icons.lua`
+local am local an=function()
+
+
+return z(`{ah}/Icons.lua`,am)end
+
+
+local ao,ap=pcall(function()
+am=game:HttpGet(al)
+return loadstring(am)()
+end)
+
+if ao and type(ap)=="table"then
+if type(am)=="string"then
+pcall(an)
+end
+
+return ap
+end
+
+return{}
+end)()
+
+if type(af.SelectedTheme)=="string"and self:IsValidTheme(af.SelectedTheme)then
+self:SetTheme(af.SelectedTheme)
+else
+self:SetTheme(self.Default.Theme)
+end
+
+self.LOADED_UI_LIBRARY=true
+
+local ah=self.Default.UISize
+
+if af and type(af.UISize)=="table"then
+local ak,al=unpack(af.UISize)
+
+if type(ak)=="number"and type(al)=="number"then
+local am=I.AbsoluteSize
+ak=math.clamp(ak,430,1000)
+al=math.clamp(al,200,500)
+ah=UDim2.fromOffset(ak,al)
+end
+end
+
+local ak=E("Frame","Window",I,{
+Position=UDim2.new(0.5,-ah.X.Offset/2,0.5,-ah.Y.Offset/2),
+Active=true,
+Size=ah,
+ClipsDescendants=true,
+BackgroundColor3=Color3.new(1,1,1),
+BackgroundTransparency=0.1,
+Elements={
+Corner=UDim.new(0,14),
+Stroke={
+ThemeTag={Color="Glass.Edge"},
+Thickness=1.5,
+Transparency=0.22
+},
+Gradient={
+Rotation=125,
+ThemeTag={
+Color="Glass.Window"
+}
+}
+},
+Childs={
+-- Vệt sáng chéo (sheen) - linh hồn của liquid glass
+E("Frame","GlassSheen",{
+Size=UDim2.fromScale(1,1),
+BackgroundColor3=Color3.fromRGB(230,255,242),
+BorderSizePixel=0,
+ZIndex=0,
+Elements={
+Gradient={
+Rotation=118,
+ThemeTag={Color="Glass.Sheen",Transparency="Glass.SheenTransparency"}
+}
+}
+}),
+-- Viền sáng mảnh ở cạnh trên khung kính
+E("Frame","GlassRimLight",{
+Size=UDim2.new(1,0,0,1),
+BackgroundColor3=Color3.fromRGB(240,255,248),
+BorderSizePixel=0,
+ZIndex=0,
+Elements={
+Gradient={
+Rotation=0,
+Color=ColorSequence.new{
+ColorSequenceKeypoint.new(0,Color3.fromRGB(255,255,255)),
+ColorSequenceKeypoint.new(1,Color3.fromRGB(170,255,210))
+},
+Transparency=NumberSequence.new{
+NumberSequenceKeypoint.new(0.00,0.30),
+NumberSequenceKeypoint.new(0.45,0.75),
+NumberSequenceKeypoint.new(1.00,1.00)
+}
+}
+}
+})
+}
+}
+)
+
+-- Quầng sáng neon mềm bao quanh khung kính
+E("UIStroke","GlassGlow",ak,{
+ThemeTag={Color="Glass.Neon"},
+Thickness=4,
+Transparency=0.88
+})
+
+u(ak.Destroying,function()
+self:Destroy()
+end)
+
+u(I:GetAttributeChangedSignal"UID",function()
+self:Destroy()
+ak:Destroy()
+end)
+
+D.Draggable(ak,ad,0.5)
+
+local al=E("Folder","Components",ak)
+local am=E("Folder","Dropdowns",I)
+
+local an=E("Frame","TopBar",al,{
+Size=UDim2.new(1,0,0,32),
+BackgroundTransparency=1
+})
+
+local ao=E("TextLabel","Title",an,{
+TextXAlignment=Enum.TextXAlignment.Left,
+AutomaticSize=Enum.AutomaticSize.XY,
+Position=UDim2.new(0,15,0.5,0),
+AnchorPoint=Vector2.new(0,0.5),
+Text=ae.Title,
+TextSize=13,
+BackgroundTransparency=1,
+ThemeTag={
+TextColor3="Glass.Text",
+Font="Font.ExtraBold"
+},
+Childs={
+E("TextLabel","SubTitle",{
+Size=UDim2.fromScale(0,1),
+AutomaticSize="X",
+AnchorPoint=Vector2.new(0,1),
+Position=UDim2.new(1,6,0.9),
+Text=ae.SubTitle,
+BackgroundTransparency=1,
+TextXAlignment="Left",
+TextYAlignment="Bottom",
+TextSize=9,
+ThemeTag={
+TextColor3="Glass.TextDim",
+Font="Font.Normal"
+}
+})
+}
+})
+
+local ap=E("Folder","Buttons",an,{
+Childs={
+E("ImageButton","Close",{
+Size=UDim2.new(0,18,0,18),
+Position=UDim2.new(1,-10,0.5),
+AnchorPoint=Vector2.new(1,0.5),
+BackgroundTransparency=1,
+BackgroundColor3=Color3.fromRGB(255,35,35),
+AutoButtonColor=false,
+ThemeTag={
+Image="Icons.Close"
+},
+Elements={
+Corner=UDim.new(0.2,0)
+}
+}),
+-- Nút mở/thu UI: viên bi tròn LIQUID GLASS phát sáng
+E("ImageButton","Minimize",{
+Size=UDim2.new(0,24,0,24),
+Position=UDim2.new(1,-38,0.5),
+AnchorPoint=Vector2.new(1,0.5),
+BackgroundColor3=Color3.fromRGB(120,255,180),
+BackgroundTransparency=0.62,
+Image="rbxassetid://10734896206",
+ImageColor3=Color3.fromRGB(238,255,246),
+ScaleType=Enum.ScaleType.Fit,
+AutoButtonColor=false,
+Elements={
+Corner=UDim.new(1,0),
+Padding={
+PaddingLeft=UDim.new(0,5),
+PaddingRight=UDim.new(0,5),
+PaddingTop=UDim.new(0,5),
+PaddingBottom=UDim.new(0,5)
+},
+Gradient={
+Rotation=90,
+ThemeTag={Color="Glass.TabSheen"}
+},
+Stroke={
+ThemeTag={Color="Glass.Neon"},
+Thickness=1,
+Transparency=0.25
+}
+},
+ThemeTag={
+BackgroundColor3="Glass.Tab"
+}
+})
+}
+})
+
+local aq=ap.Minimize
+local ar=ap.Close
+
+-- Quầng sáng mềm sau viên bi mở UI
+E("Frame","MinimizeGlow",an,{
+Size=UDim2.new(0,34,0,34),
+Position=UDim2.new(1,-33,0.5),
+AnchorPoint=Vector2.new(1,0.5),
+BackgroundTransparency=0.55,
+BackgroundColor3=Color3.fromRGB(126,255,182),
+BorderSizePixel=0,
+ZIndex=0,
+Elements={
+Corner=UDim.new(1,0),
+Gradient={
+Rotation=90,
+ThemeTag={Color="Glass.LineGradient",Transparency="Glass.LineTransparency"}
+}
+}
+})
+aq.ZIndex=1
+
+local as=setmetatable(ae,{
+__index=R.Window
+})
+
+as.SelectedTabs={}
+
+local at,au=aa(af,an)
+
+at.Parent=al
+au.Parent=al
+
+-- Viền kính phát sáng bao quanh panel Content
+E("UIStroke","ContentStroke",au,{
+ThemeTag={Color="Glass.Neon"},
+Thickness=1,
+Transparency=0.4,
+ApplyStrokeMode=Enum.ApplyStrokeMode.Border
+})
+
+-- Đường kẻ phát sáng dưới TopBar (ngăn header với thanh tab)
+E("Frame","TopBarSeparator",an,{
+Size=UDim2.new(1,0,0,1),
+Position=UDim2.new(0,0,1,-1),
+AnchorPoint=Vector2.new(0,1),
+BorderSizePixel=0,
+BackgroundTransparency=0.25,
+Elements={
+Gradient={
+Rotation=0,
+ThemeTag={Color="Glass.LineGradient",Transparency="Glass.LineTransparency"}
+}
+},
+ThemeTag={BackgroundColor3="Glass.White"}
+})
+
+-- Đường kẻ phát sáng DỌC ngăn cách sidebar tab và panel Content
+E("Frame","TabBarSeparator",al,{
+Size=UDim2.new(0,1,1,-(an.Size.Y.Offset+13)),
+Position=UDim2.new(0,at.Size.X.Offset,0,an.Size.Y.Offset+5),
+AnchorPoint=Vector2.new(0.5,0),
+BorderSizePixel=0,
+BackgroundTransparency=0.25,
+Elements={
+Gradient={
+Rotation=90,
+ThemeTag={Color="Glass.LineGradient",Transparency="Glass.LineTransparency"}
+}
+},
+ThemeTag={BackgroundColor3="Glass.White"}
+})
+
+local av=table.freeze{
+ContainerHolder=au,
+TabsContainer=at,
+Components=al,
+MainFrame=ak
+}
+
+function as:GetElements()
+return av
+end
+
+local aw=E("Frame","ControlWindowSize",ak,{
+Size=UDim2.new(0,35,0,35),
+Position=ak.Size,
+AnchorPoint=Vector2.new(0.8,0.8),
+BackgroundTransparency=1,
+Active=true,
+Elements={
+Corner=UDim.new(0,6)
+},
+ThemeTag={
+BackgroundColor3="Glass.Neon"
+}
+})
+
+-- Tay nắm DỌC: kéo ngang để đổi bề rộng sidebar tab
+local ax=E("Frame","ControlTabsSize",ak,{
+Size=UDim2.new(0,6,1,-(an.Size.Y.Offset+16)),
+Position=UDim2.new(0,at.Size.X.Offset+3,0,an.Size.Y.Offset+8),
+AnchorPoint=Vector2.new(0.5,0),
+BackgroundTransparency=1,
+Active=true,
+Elements={
+Corner=UDim.new(1,0)
+},
+ThemeTag={
+BackgroundColor3="Glass.Neon"
+}
+})local ay=function(
+
+ay)
+local az=ay:GetAttribute"Resizing"
+ay:SetAttribute("Resizing",tick())
+
+if az and(tick()-az)<=0.1 then
+return nil
+end
+
+J(ay,"BackgroundTransparency",0.5,0.3):Play()
+while tick()-ay:GetAttribute"Resizing"<=0.1 do task.wait()end
+J(ay,"BackgroundTransparency",1,0.4):Play()end
+
+
+u(aw:GetPropertyChangedSignal"Position",function()
+ay(aw)
+local az=aw.Position
+ak.Size=az
+af.UISize={az.X.Offset,az.Y.Offset}
+end)
+
+u(ax:GetPropertyChangedSignal"Position",function()
+ay(ax)
+local az=ax.Position
+local aB=math.clamp(az.X.Offset-3,96,240)
+at.Size=UDim2.new(0,aB,1,-an.Size.Y.Offset)
+au.Size=UDim2.new(1,-(aB+12),1,-(an.Size.Y.Offset+12))
+au.Position=UDim2.new(0,aB+6,0,an.Size.Y.Offset+6)
+af.SidebarWidth=aB
+local aC=al.TabBarSeparator
+if aC then
+aC.Position=UDim2.new(0,aB,0,an.Size.Y.Offset+5)
+end
+end)
+
+D.Draggable(aw,ad,0.68,function(az,aA,aB,aC)
+return UDim2.fromOffset(math.clamp(aA,430,1000),math.clamp(aC,200,500))
+end)
+
+D.Draggable(ax,ad,0.68,function(aA,aB,aC,aD)
+return UDim2.new(0,math.clamp(aB,99,243),aC,aD)
+end)
+
+local aA={
+Title="Close Window?",
+Content="You Want Close UI?",
+Options={
+{
+Title="YES",
+Callback=function()self:Destroy()end
+},
+{
+Title="NO"
+}
+}
+}
+
+u(aq.MouseEnter,function()aq.BackgroundTransparency=0.38 end)
+u(aq.MouseLeave,function()aq.BackgroundTransparency=0.62 end)
+
+u(ar.MouseEnter,function()ar.BackgroundTransparency=0.65 end)
+u(ar.MouseLeave,function()ar.BackgroundTransparency=1.00 end)
+
+as.SetUIScale=self.SetUIScale
+as.SUBTITLE_LABEL=ao.SubTitle
+as.TITLE_LABEL=ao
+
+local aB=as:StartWindow{
+Resizers={aw,ax},
+MinimizeButton=aq,
+Dropdowns=am,
+MainFrame=ak,
+TopBar=an,
+
+SubTitle=ao.SubTitle,
+Title=ao,
+
+UIScale=ad,
+Flags=ag
+}
+
+u(aq.Activated,function()
+as:MinimizeButton()
+end)
+
+u(ar.Activated,function()
+    as:Dialog(aA)
+end)
+
+local searchContainerHeight = 22
+
+local searchContainer = E("Frame", "SearchContainer", an, {
+    Size = UDim2.new(0, 170, 0, searchContainerHeight),
+    Position = UDim2.new(1, -59, 0.5, 0), -- Nằm giữa subtitle và nút thu nhỏ (-)
+    AnchorPoint = Vector2.new(1, 0.5),
+    BackgroundTransparency = 1,
+    ZIndex = 5
+})
+
+-- Background của Search Box (màu nền bo góc) + viền xanh
+local searchInputBg = E("Frame", "SearchBg", searchContainer, {
+    Size = UDim2.fromScale(1, 1),
+    ThemeTag = {
+        BackgroundColor3 = "Colors.Stroke"
+    },
+    Elements = {
+        Corner = UDim.new(0, 6),
+        Stroke = {
+            ThemeTag = {Color = "Colors.Border.Green"},
+            Thickness = 1
+        }
+    }
+})
+
+-- Ô nhập Text tìm kiếm
+local searchInput = E("TextBox", "SearchBar", searchInputBg, {
+    Size = UDim2.new(1, -25, 1, 0), -- Chiều rộng trừ đi khoảng trống cho Icon
+    Position = UDim2.new(0, 8, 0, 0), -- Cách lề trái 8px
+    BackgroundTransparency = 1,
+    PlaceholderText = "Search Section And Function",
+    Text = "",
+    TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ClearTextOnFocus = true, 
+    ThemeTag = {
+        TextColor3 = "Colors.Text.Default",
+        PlaceholderColor3 = "Colors.Text.Darker",
+        Font = "Font.Normal"
+    }
+})
+
+-- Icon kính lúp nằm bên phải
+local searchIcon = E("ImageLabel", "SearchIcon", searchInputBg, {
+    Size = UDim2.new(0, 14, 0, 14),
+    Position = UDim2.new(1, -8, 0.5, 0), -- Nằm sát lề phải
+    AnchorPoint = Vector2.new(1, 0.5),
+    BackgroundTransparency = 1,
+    ThemeTag = {
+        Image = "Icons.Search",
+        ImageColor3 = "Colors.Icons"
+    }
+})
+
+u(searchInput:GetPropertyChangedSignal("Text"), function()
+    as:PerformSearch(searchInput.Text)
+end)
+
+return as   
+end
+
+return s
+ 
+-- ===== END EMBEDDED REDZ LIBRARY V5 =====
+        end)()
+    end)
+    if __okEmb and __resEmb ~= nil then
+        redzlib = __resEmb
+    else
+        __DIO_libErr = "[EMBED] " .. tostring(__resEmb)
+    end
+end
 if redzlib == nil then
-    local __msg = (__DIO_libDownloaded
-        and "Library tai duoc nhung bi loi khi chay (KHONG phai loi mang)."
-        or  "Khong tai duoc Library! Kiem tra mang / doi DNS 1.1.1.1 roi chay lai.")
-        .. "\nChi tiet:\n" .. tostring(__DIO_libErr)
+    -- Fallback: neu ban nhung chay loi thi moi thu tai tu mang
+    for _, __DIO_libURL in ipairs({
+        "https://raw.githubusercontent.com/DIO482/Script-/refs/heads/main/Library-Redz-Pulic-Source.txt",
+        "https://cdn.jsdelivr.net/gh/DIO482/Script-@main/Library-Redz-Pulic-Source.txt",
+    }) do
+        local __ok, __res = pcall(function()
+            return loadstring(game:HttpGet(__DIO_libURL))()
+        end)
+        if __ok and __res ~= nil then
+            redzlib = __res
+            break
+        end
+        __DIO_libErr = tostring(__DIO_libErr or "") .. " | [" .. tostring(__DIO_libURL:match("https?://([^/]+)")) .. "] " .. tostring(__res)
+    end
+end
+if redzlib == nil then
+    -- [EMBED-LIB] Library da duoc nhung vao file nen binh thuong KHONG can mang.
+    -- Neu van that bai => doc ly do that su ben duoi (dung doan mang/DNS nua).
+    local __msg = "Khong tai duoc Library (ban nhung trong file cung loi).\nLy do: " .. tostring(__DIO_libErr)
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", {
             Title = "DIO Hub - Loi tai Library",
@@ -3939,11 +8723,11 @@ if redzlib == nil then
         __sg.ResetOnSpawn = false
         __sg.Parent = __pg
         local __fr = Instance.new("TextButton")
-        __fr.Size = UDim2.fromOffset(460, 300)
-        __fr.Position = UDim2.new(0.5, -230, 0.5, -150)
+        __fr.Size = UDim2.fromOffset(420, 150)
+        __fr.Position = UDim2.new(0.5, -210, 0.4, -75)
         __fr.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
         __fr.TextColor3 = Color3.fromRGB(255, 120, 120)
-        __fr.TextSize = 12
+        __fr.TextSize = 14
         __fr.TextWrapped = true
         __fr.Font = Enum.Font.Code
         __fr.Text = "DIO HUB - LIBRARY LOAD FAILED (bam de tat)\n\n" .. __msg
@@ -3954,28 +8738,10 @@ if redzlib == nil then
     end)
     error("[DIO] redzlib load failed: " .. tostring(__DIO_libErr))
 end
-
--- [FIX] Shim tương thích: nếu code cũ còn dùng SaveFolder thì tự map sang ScriptFolder (giữ nguyên tên hub/tab)
-do
-    local function FixCfg(cfg)
-        if type(cfg)=="table" and cfg.SaveFolder and not cfg.ScriptFolder then
-            local v=tostring(cfg.SaveFolder):gsub("%.json$",""):gsub("/",""):gsub("^%s+",""):gsub("%s+$","")
-            if v=="" then v="dio" end
-            cfg.ScriptFolder=v
-            cfg.SaveFolder=nil
-        end
-        return cfg
-    end
-    if type(redzlib.MakeWindow)=="function" then
-        local old=redzlib.MakeWindow
-        redzlib.MakeWindow=function(self,cfg) return old(self, FixCfg(cfg)) end
-    end
-end
-
 local Window = redzlib:MakeWindow({
     Title = "DIO Hub ",
     SubTitle = "DIO Loader Script | Blox Fruit",
-    ScriptFolder = "dio"
+    SaveFolder = "dio.json"
 })
 __DIO_TNotify = function(title, content, dur)
     if getgenv().DIO_ToggleNotify ~= true then return end
@@ -3986,7 +8752,7 @@ end
 local Minimizer = Window:NewMinimizer({
   KeyCode = Enum.KeyCode.LeftControl
 })
-Minimizer:CreateMobileMinimizer({
+local MobileButton = Minimizer:CreateMobileMinimizer({
   Image = "rbxassetid://105848560127717",
   BackgroundColor3 = Color3.fromRGB(0, 255, 254)
 })
@@ -4433,12 +9199,18 @@ do
                                 pcall(__DIO_UISetOn, __fk, key, true)
                                 pcall(__DIO_UIWant, __fk, key, true)
                             end
+                            local __newFlag = false
+                            for __k in pairs(__ownedFlags or {}) do __newFlag = true break end
                             local __onNow = __DIO_TweenOnIfAnyFlag()
                             if __onNow then
                                 __DIO_FalseSince = nil
                                 __DIO_TweenBlockT = 0
                                 shouldTween = true
                                 pcall(function() __DIO_Wake(true) end)
+                            end
+                            if not __onNow and not __newFlag and getgenv().DIOAuditToggles == true then
+                                warn("[DIO AUDIT] Toggle '" .. tostring(Setting and Setting.Name)
+                                    .. "' BAT nhung KHONG tao _G. flag nao -> kiem tra _G. / shouldTween cua toggle nay.")
                             end
                         else
                             pcall(origCb, false)
@@ -4509,6 +9281,7 @@ do
             function tab:AddDropdown(Setting)
                 local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title))
                 local saved = GetSetting(key, nil)
+                local __savedCb = saved
                 if Setting and saved ~= nil then
                     if Setting.MultiSelect and type(saved) == "table" then
                         local __arrD = {}
@@ -5222,6 +9995,7 @@ task.spawn(function()
     end
 end)
 local alreadyTeleported = false
+local teleporting       = false
 local __DIO_LvlTryT     = 0
 local __DIO_LvlQTryT    = 0
 _G.FarmMode  = _G.FarmMode or "Farm Level"
@@ -5229,6 +10003,7 @@ _G.StartFarm = _G.StartFarm or false
 __DIO_OwnFarmFlag = nil
 local function __DIO_LvlReset()
     alreadyTeleported = false
+    teleporting       = false
     __DIO_LvlTryT     = 0
 end
 function __DIO_FarmHardStop()
@@ -5511,6 +10286,7 @@ __DIO_SafeLoop(function()
                 end
             end)
         else
+            teleporting = false
             alreadyTeleported = false
         end
     end
@@ -5906,7 +10682,7 @@ __DIO_BerryHopT = 0
 __DIO_SafeLoop(function()
     while __DIO_wait(0.3) do
         if _G.AutoBerryH then
-            local __okH, _, __hasH = pcall(__DIO_FarmBerryStep)
+            local __okH, __nH, __hasH = pcall(__DIO_FarmBerryStep)
             if __okH and not __hasH then
                 if __DIO_BerryHopT == 0 then
                     __DIO_BerryHopT = tick()
@@ -6350,36 +11126,36 @@ Tabs.Main:AddToggle({
 })
 __DIO_SafeLoop(function()
     while __DIO_wait(1) do
-        if _G.AutoFarmIsland and _G.SelectIsland and IslandData then
-            local island = IslandData[_G.SelectIsland]
-            if island then
-                local islandPos = island.CFrame
-                local mobs = island.Mobs
-                local MobMap = {}
-                for _, name in ipairs(mobs) do
-                    MobMap[name] = true
-                end
-                local found = false
-                for _, v in pairs(workspace.Enemies:GetChildren()) do
-                    if MobMap[v.Name]
-                    and v:FindFirstChild("Humanoid")
-                    and v:FindFirstChild("HumanoidRootPart")
-                    and v.Humanoid.Health > 0 then
-                        found = true
-                        repeat
-                            __DIO_wait(0.25)
-                            _tp(v.HumanoidRootPart.CFrame * CFrame.new(0,10,0))
-                            Attack.Kill(v, true)
-                            if __DIO_GhostCheck(v) then break end
-                        until not _G.AutoFarmIsland
-                           or not v.Parent
-                           or v.Humanoid.Health <= 0
-                    end
-                end
-                if not found then
-                    _tp(islandPos)
-                end
+        if not _G.AutoFarmIsland then continue end
+        if not _G.SelectIsland then continue end
+        if not IslandData then continue end
+        local island = IslandData[_G.SelectIsland]
+        if not island then continue end
+        local islandPos = island.CFrame
+        local mobs = island.Mobs
+        local MobMap = {}
+        for _, name in ipairs(mobs) do
+            MobMap[name] = true
+        end
+        local found = false
+        for _, v in pairs(workspace.Enemies:GetChildren()) do
+            if MobMap[v.Name]
+            and v:FindFirstChild("Humanoid")
+            and v:FindFirstChild("HumanoidRootPart")
+            and v.Humanoid.Health > 0 then
+                found = true
+                repeat
+                    __DIO_wait(0.25)
+                    _tp(v.HumanoidRootPart.CFrame * CFrame.new(0,10,0))
+                    Attack.Kill(v, true)
+                    if __DIO_GhostCheck(v) then break end
+                until not _G.AutoFarmIsland
+                   or not v.Parent
+                   or v.Humanoid.Health <= 0
             end
+        end
+        if not found then
+            _tp(islandPos)
         end
     end
 end, "L4526")
@@ -6780,6 +11556,22 @@ Tabs.Main:AddToggle({
         end
     end
 })
+local function HopServer()
+    pcall(function()
+        local Http = __SVC_HTTP
+        local Servers = {}
+        local req = game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?sortOrder=Asc&limit=100")
+        local data = Http:JSONDecode(req)
+        for i,v in pairs(data.data) do
+            if v.playing < v.maxPlayers then
+                table.insert(Servers, v.id)
+            end
+        end
+        if #Servers > 0 then
+            __SVC_TP:TeleportToPlaceInstance(game.PlaceId, Servers[math.random(1,#Servers)], game.Players.LocalPlayer)
+        end
+    end)
+end
 __DIO_SafeLoop(function()
     while __DIO_wait(1) do
         if _G.AutoHop_Dough then
@@ -7276,7 +12068,7 @@ Tabs.Main:AddSlider({
     Callback = function(Value)
         _G.HealthFarmMastery = Value
     end})
-Tabs.Main:AddToggle({
+local MasteryFruits = Tabs.Main:AddToggle({
 Name = __DIO_T["Auto Mastery Fruits"],
 Description = "",
 Default = false,
@@ -7323,7 +12115,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L5523")
-Tabs.Main:AddToggle({
+local MasteryGun = Tabs.Main:AddToggle({
 Name = __DIO_T["Auto Mastery Gun"],
 Description = "",
 Default = false,
@@ -7422,7 +12214,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L5562")
-Tabs.Main:AddToggle({
+local MasterySword = Tabs.Main:AddToggle({
 Name = __DIO_T["Auto Mastery All Sword"],
 Description = "",
 Default = false,
@@ -7600,15 +12392,14 @@ __DIO_FireMeleeSwordNow = function(mob)
 end
 __DIO_SafeLoop(function()
     while __DIO_wait(1.5) do
-        if _G.AutoSkillGhost then
-            pcall(function()
-                local c = plr.Character
-                local hum = c and c:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Sit then return end
-                local mob = __DIO_PickSkillTarget and __DIO_PickSkillTarget()
-                if mob then __DIO_FireMeleeSwordNow(mob) end
-            end)
-        end
+        if not _G.AutoSkillGhost then continue end
+        pcall(function()
+            local c = plr.Character
+            local hum = c and c:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Sit then return end
+            local mob = __DIO_PickSkillTarget and __DIO_PickSkillTarget()
+            if mob then __DIO_FireMeleeSwordNow(mob) end
+        end)
     end
 end, "L5829")
 Neartween = Tabs.Settings:AddToggle({
@@ -7619,7 +12410,7 @@ Callback = function(Value)
   _G.Neartween = (Value == true)
 end})
 _G.Neartween = (GetSetting("UI/Settings/Tween speed 600 if near", true) == true)
-_B = true
+_B = true  -- [MOBHOLD] khoi tao mac dinh ON (truong hop UI khong goi callback luc tao toggle)
 Bringmob = Tabs.Settings:AddToggle({
 Name = __DIO_T["Bring Mobs"],
 Description = "",
@@ -8146,6 +12937,7 @@ FishingToggle = Tabs.Fish:AddToggle({
 })
 local Players = __SVC_PLR
 local LocalPlayer = Players.LocalPlayer
+local Workspace = __SVC_WS
 local ReplicatedStorage = __SVC_RS
 local FishReplicated = ReplicatedStorage:FindFirstChild("FishReplicated")
     or ReplicatedStorage:WaitForChild("FishReplicated", 5)
@@ -8992,7 +13784,7 @@ __DIO_SafeLoop(function()
 		       if _G.AutoMatSoul and World3 then
 			     local BonesTable = {"Reborn Skeleton","Living Zombie","Demonic Soul","Posessed Mummy"}
 			     local zx = GetConnectionEnemies(BonesTable)
-	             if zx then repeat __DIO_wait(Sec) Attack.Kill(zx, _G.AutoMatSoul)until not _G.AutoMatSoul or zx.Humanoid.Health <= 0 or not zx.Parent
+	             if zx then repeat __DIO_wait(Sec) Attack.Kill(zx, _G.AutoMatSoul)until not _G.AutoMatSoul or zx.Humanoid.Health <= 0 or not zx.Parent or zx.Humanoid.Health <= 0
 				 else _tp(CFrame.new(-9504.8564453125, 172.14292907714844, 6057.259765625))
 			   end
 		     else
@@ -10249,6 +15041,7 @@ __DIO_SafeLoop(function()
     if _G.AutoKenVTWO then
       pcall(function()
       local Kv2Pos1 = CFrame.new(-12444.78515625, 332.40396118164, -7673.1806640625)
+      local Kv2Pos2 = "Kuy"
       local Kv2Pos3 = CFrame.new(-10920.125, 624.20275878906, -10266.995117188)
       local Kv2Pos4 = CFrame.new(-13277.568359375, 370.34185791016, -7821.1572265625)
       local Kv2Pos5 = CFrame.new(-13493.12890625, 318.89553833008, -8373.7919921875)
@@ -10784,7 +15577,8 @@ __DIO_SafeLoop(function()
       pcall(function()
         if not GetBP("Sanguine Art") then replicated.Remotes.CommF_:InvokeServer("Sanguine Art") end
         if not GetBP("Sanguine Art") then
-          if GetM("Leviathan Heart") < 1 then
+          if GetM("Leviathan Heart") >= 1 then print("Completed!!")
+          else
             __DIO_BorrowValue("Snaguine","DangerSc","Lv Infinite")
             if World3 then __DIO_BorrowFlag("Snaguine","SailBoats") else __DIO_ReleaseFlag("Snaguine","SailBoats") end
           end
@@ -10867,7 +15661,7 @@ end})
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if _G.FindMirage then
-      __DIO_PcallLog("FindMirage", function()
+      pcall(function()
         local __wo = workspace:FindFirstChild("_WorldOrigin")
         local __loc = __wo and __wo:FindFirstChild("Locations")
         local __found = __loc and __loc:FindFirstChild("Mirage Island", true)
@@ -10893,9 +15687,9 @@ __DIO_SafeLoop(function()
           local __mapM = workspace:FindFirstChild("Map")
           local __mi = __mapM and __mapM:FindFirstChild("MysticIsland")
           if __mi and __mi:FindFirstChild("Center") then
-            _tp(__DIO_FindHoverCF(__mi.Center.CFrame * CFrame.new(0, 300, 0)))
+            _tp(__mi.Center.CFrame * CFrame.new(0, 300, 0))
           else
-            _tp(__DIO_FindHoverCF(__found.CFrame * CFrame.new(0, 300, 0)))
+            _tp(__found.CFrame * CFrame.new(0, 300, 0))
           end
         end
       end)
@@ -11117,6 +15911,13 @@ Default = false,
 Callback = function(Value)
   LookM = Value
 end})
+function MoveCamtoMoon() 
+    local __chMCM = plr and plr.Character
+    local __hrpMCM = __chMCM and __chMCM:FindFirstChild("HumanoidRootPart")
+    if not __hrpMCM then return end
+    workspace.CurrentCamera.CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position,Lighting:GetMoonDirection() + workspace.CurrentCamera.CFrame.Position)
+    __hrpMCM.CFrame = CFrame.new(__hrpMCM.Position,Lighting:GetMoonDirection() + __hrpMCM.CFrame.Position)
+end
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if LookM then
@@ -11325,6 +16126,7 @@ __DIO_SafeLoop(function()
         elseif replicated.Remotes.CommF_:InvokeServer("Wenlocktoad","1") == 0 then
 	      replicated.Remotes.CommF_:InvokeServer("Wenlocktoad","2")
 	    elseif replicated.Remotes.CommF_:InvokeServer("Wenlocktoad","1") == 1 then
+          warn("Sea Beast Soon")
         end
       end
     end)
@@ -11690,14 +16492,14 @@ Default = false,
 Callback = function(Value)
   _G.FarmBlazeEM = Value
 end})
-checkQuesta=function()local a={[1]={["Context"]="Check"}}local b=nil;pcall(function()local c={[1]={["Context"]="RequestQuest"}}__SVC_RS:WaitForChild("Modules"):WaitForChild("Net"):WaitForChild("RF/DragonHunter"):InvokeServer(unpack(c))end)local d,e=pcall(function()b=__SVC_RS:WaitForChild("Modules"):WaitForChild("Net"):WaitForChild("RF/DragonHunter"):InvokeServer(unpack(a))end)if not d then warn("[DIO] checkQuesta failed: "..tostring(e))end local f=false;local g;local h;local i;if b then if b.Text then f=true;local j=b.Text;if string.find(tostring(j),"Defeat")then i=1;g=string.sub(tostring(j),8,9)g=tonumber(g)local k={"Hydra Enforcer","Venomous Assailant"}for l,m in pairs(k)do if string.find(j,m)then h=m;break end end elseif string.find(tostring(j),"Destroy")then g=10;i=2;h=nil end end end;return f,h,g,i end
+checkQuesta=function()local a={[1]={["Context"]="Check"}}local b=nil;pcall(function()local c={[1]={["Context"]="RequestQuest"}}__SVC_RS:WaitForChild("Modules"):WaitForChild("Net"):WaitForChild("RF/DragonHunter"):InvokeServer(unpack(c))end)local d,e=pcall(function()b=__SVC_RS:WaitForChild("Modules"):WaitForChild("Net"):WaitForChild("RF/DragonHunter"):InvokeServer(unpack(a))end)local f=false;local g;local h;local i;if b then if b.Text then f=true;local j=b.Text;if string.find(tostring(j),"Defeat")then i=1;g=string.sub(tostring(j),8,9)g=tonumber(g)local k={"Hydra Enforcer","Venomous Assailant"}for l,m in pairs(k)do if string.find(j,m)then h=m;break end end elseif string.find(tostring(j),"Destroy")then g=10;i=2;h=nil end end end;return f,h,g,i end
 BackTODoJo=function()for a,b in pairs(__SVC_PLR.LocalPlayer.PlayerGui.Notifications:GetChildren())do if b.Name=="NotificationTemplate"then if string.find(b.Text,"Head back to the Dojo to complete more tasks")then return true end end end;return false end
 DragonMobClear=function(a,b,c)if workspace.Enemies:FindFirstChild(b)then for d,e in pairs(workspace.Enemies:GetChildren())do if e.Name==b and Attack.Alive(e)then if a then Attack.Kill(e,a)end end end else _tp(c)end end
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if _G.FarmBlazeEM then
       pcall(function()
-        local a,v,_,x = checkQuesta()
+        local a,v,h,x = checkQuesta()
         if a == true and not BackTODoJo() then
           if x == 1 then
             if v == "Hydra Enforcer" or v == "Venomous Assailant" then
@@ -12070,9 +16872,10 @@ Tabs.Prehistoric:AddToggle({
         end
     end
 })
+local targetDestination = nil
 __DIO_SafeLoop(function()
     while __DIO_wait(Sec) do
-        __DIO_PcallLog("FindPrehistoric", function()
+        pcall(function()
             if _G.Prehis_Find then
                 local char = plr.Character
                 if not char then return end
@@ -12084,6 +16887,7 @@ __DIO_SafeLoop(function()
                 if not prehistoricLoc then
                     if __DIO_BoatAssist() ~= "sitting" then return end
                     local seaCFrame = CFrame.new(-10000000, 31, 37016.25)
+                    targetDestination = seaCFrame
                     __DIO_NoClipShipNow()
                     _tp(CFrame.new(seaCFrame.Position.X, __DIO_FindCruiseY(), seaCFrame.Position.Z))
                 else
@@ -12354,31 +17158,6 @@ end, "L10725")
 Tabs.SeaEvent:AddSection("Sea Event / Setting Sail")
 local ListSeaBoat={"Guardian","PirateGrandBrigade","MarineGrandBrigade","PirateBrigade","MarineBrigade","PirateSloop","MarineSloop","Beast Hunter"}
 local ListSeaZone={"Lv 1","Lv 2","Lv 3","Lv 4","Lv 5","Lv 6","Lv Infinite"}
--- [FIX] Khai bao TRUOC khi dropdown ben duoi dung (truoc day nam o cuoi tab nen Options = nil)
-__DIO_SeaWpOpts   = {"Melee","Sword","Gun","Blox Fruit"}
-__DIO_SeaSkillOpts = {"Z","X","C","V","F"}
-__DIO_SeaNormList = function(Value, opts, def)
-    local __raw = {}
-    if type(Value) == "table" then
-        for __k, __v in pairs(Value) do
-            if __v == true then
-                if type(__k) == "string" and table.find(opts, __k) then
-                    table.insert(__raw, __k)
-                elseif type(__k) == "number" and table.find(opts, Value[__k]) then
-                    table.insert(__raw, Value[__k])
-                end
-            end
-        end
-    elseif type(Value) == "string" and table.find(opts, Value) then
-        table.insert(__raw, Value)
-    end
-    if #__raw == 0 and def then table.insert(__raw, def) end
-    local __out = {}
-    for _, __o in ipairs(opts) do
-        if table.find(__raw, __o) then table.insert(__out, __o) end
-    end
-    return __out
-end
 Q = Tabs.SeaEvent:AddDropdown({
     Name = __DIO_T["Select Weapon Sea Event"],
     Options = __DIO_SeaWpOpts,
@@ -12562,6 +17341,30 @@ _G.BoatTweenSpeed = math.clamp(math.floor((tonumber(GetSetting("UI/SeaEvent/Boat
 _G.SelectedBoat = _G.SelectedBoat or GetSetting("UI/SeaEvent/Select Boats", "Guardian") or "Guardian"
 _G.DangerSc = _G.DangerSc or GetSetting("UI/SeaEvent/Select Sea Level", "Lv 6") or "Lv 6"
 Tabs.SeaEvent:AddSection("Skill And Boat Sea Event")
+__DIO_SeaWpOpts   = {"Melee","Sword","Gun","Blox Fruit"}
+__DIO_SeaSkillOpts = {"Z","X","C","V","F"}
+__DIO_SeaNormList = function(Value, opts, def)
+    local __raw = {}
+    if type(Value) == "table" then
+        for __k, __v in pairs(Value) do
+            if __v == true then
+                if type(__k) == "string" and table.find(opts, __k) then
+                    table.insert(__raw, __k)
+                elseif type(__k) == "number" and table.find(opts, Value[__k]) then
+                    table.insert(__raw, Value[__k])
+                end
+            end
+        end
+    elseif type(Value) == "string" and table.find(opts, Value) then
+        table.insert(__raw, Value)
+    end
+    if #__raw == 0 and def then table.insert(__raw, def) end
+    local __out = {}
+    for _, __o in ipairs(opts) do
+        if table.find(__raw, __o) then table.insert(__out, __o) end
+    end
+    return __out
+end
 _G.SeaEventWeaponList = __DIO_SeaNormList(GetSetting("UI/SeaEvent/Select Weapon Sea Event", nil), __DIO_SeaWpOpts, "Melee")
 _G.SeaEventSkillList  = __DIO_SeaNormList(GetSetting("UI/SeaEvent/Select Skill", nil), __DIO_SeaSkillOpts, "Z")
 Tabs.SeaEvent:AddToggle({
@@ -12581,8 +17384,6 @@ Tabs.SeaEvent:AddSlider({
         _G.DodgeHeight = tonumber(Value) or 200
     end
 })
-_G.SeaTeleportY = math.clamp(math.floor(tonumber(GetSetting("UI/SeaEvent/" .. __DIO_T["Teleport Y boat If have Sea Event (ALL)"], 150)) or 150), 150, 600)
-_G.FlyBoatY = math.clamp(math.floor(tonumber(GetSetting("UI/SeaEvent/" .. __DIO_T["Fly Boat"], 150)) or 150), 30, 500)
 Tabs.SeaEvent:AddSlider({
     Name = __DIO_T["Teleport Y boat If have Sea Event (ALL)"],
     Min = 150,
@@ -12722,24 +17523,14 @@ __DIO_SeaScanAny = function()
     end
     return false
 end
-__DIO_FindSeaY = function()
-    return math.clamp(math.floor(tonumber(_G.SeaTeleportY) or 150), 150, 600)
-end
-__DIO_FindYState = function()
-    if _G.TeleportYSlider ~= true then return nil end
-    if __DIO_SeaScanAny() then return "event" end
-    if (tick() - (__DIO_SeaAnyHoldT or 0)) < 3 then return "hold" end
-    return nil
-end
 __DIO_FindCruiseY = function()
-    if __DIO_FindYState() then
-        return __DIO_FindSeaY()
+    if _G.TeleportYSlider and __DIO_SeaScanAny() then
+        return math.clamp(math.floor(tonumber(_G.SeaTeleportY) or 150), 150, 600)
+    end
+    if _G.TeleportYSlider and (tick() - (__DIO_SeaAnyHoldT or 0)) < 3 then
+        return math.clamp(math.floor(tonumber(_G.SeaTeleportY) or 150), 150, 600)
     end
     return __DIO_FlyBoatY()
-end
-__DIO_FindHoverCF = function(cf)
-    if not __DIO_FindYState() then return cf end
-    return CFrame.new(cf.Position.X, __DIO_FindSeaY(), cf.Position.Z) * (cf - cf.Position)
 end
 __DIO_PlayerNames = function()
     local __out = {}
@@ -12904,7 +17695,7 @@ end})
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if _G.AutofindKitIs then
-      __DIO_PcallLog("FindKitsune", function()
+      pcall(function()
         local __wo = workspace:FindFirstChild("_WorldOrigin")
         local __loc = __wo and __wo:FindFirstChild("Locations")
         local __found = __loc and __loc:FindFirstChild("Kitsune Island", true)
@@ -12927,7 +17718,7 @@ __DIO_SafeLoop(function()
             if __humE then __humE.Sit = false end
           end)
         else
-          _tp(__DIO_FindHoverCF(__found.CFrame * CFrame.new(0, 500, 0)))
+          _tp(__found.CFrame * CFrame.new(0, 500, 0))
         end
       end)
     end
@@ -13206,6 +17997,7 @@ task.delay(6, function()
                 local __cnt = 0
                 if type(__drop.DROPDOWN_OPTIONS) == "table" then __cnt = #__drop.DROPDOWN_OPTIONS end
                 if __cnt == 0 then
+                    warn("[DIO V7] Dropdown " .. __pair[2] .. " trong -> nap lai toan bo player")
                     if type(__drop.CLEAR_DROPDOWN) == "function" then pcall(__drop.CLEAR_DROPDOWN) end
                     for __i = 1, #__names do __DIO_DropAdd(__drop, __names[__i]) end
                 end
@@ -13298,7 +18090,7 @@ Tabs.SeaEvent:AddToggle({
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if _G.FrozenDimension then
-      __DIO_PcallLog("FindFrozen", function()
+      pcall(function()
         local __wo = workspace:FindFirstChild("_WorldOrigin")
         local __loc = __wo and __wo:FindFirstChild("Locations")
         local __found = __loc and __loc:FindFirstChild("Frozen Dimension", true)
@@ -13316,10 +18108,10 @@ __DIO_SafeLoop(function()
               __DIO_TweenTarget = nil
               __DIO_LastTweenTarget = nil
               if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
-            else
-                _tp(CFrame.new(__dest.Position.X, __DIO_FindCruiseY(), __dest.Position.Z))
-                __found = __loc and __loc:FindFirstChild("Frozen Dimension", true)
+              continue
             end
+            _tp(CFrame.new(__dest.Position.X, __DIO_FindCruiseY(), __dest.Position.Z))
+            __found = __loc and __loc:FindFirstChild("Frozen Dimension", true)
           until not _G.FrozenDimension or __found or (__dest.Position - __hrpR.Position).Magnitude <= 10 or not __humR.Sit
           pcall(function()
             local __chE = plr.Character
@@ -13331,9 +18123,9 @@ __DIO_SafeLoop(function()
           local __gate = __mapF and __mapF:FindFirstChild("LeviathanGate")
           local __gCenter = __gate and __gate:FindFirstChild("Center")
           if __gCenter then
-            _tp(__DIO_FindHoverCF(__gCenter.CFrame * CFrame.new(0, 300, 0)))
+            _tp(__gCenter.CFrame * CFrame.new(0, 300, 0))
           else
-            _tp(__DIO_FindHoverCF(__found.CFrame * CFrame.new(0, 300, 0)))
+            _tp(__found.CFrame * CFrame.new(0, 300, 0))
           end
         end
       end)
@@ -13370,7 +18162,7 @@ __DIO_SafeLoop(function()
             isRunning = true
             pcall(function()
                 local boat = getBeastHunter()
-                local _, heartPart = getLeviathanHeart()
+                local heartModel, heartPart = getLeviathanHeart()
                 local character = plr.Character 
                 if not boat or not heartPart or not character then return end
                 local boatRoot = boat.PrimaryPart
@@ -13393,6 +18185,11 @@ __DIO_SafeLoop(function()
                 tween.Completed:Wait()
                 harpoonSeat:Sit(humanoid)
                 __DIO_wait(0.4)
+                for _, obj in pairs(boat:GetDescendants()) do
+                    if obj:IsA("RemoteEvent") then
+                        print("RemoteEvent:", obj.Name, "|", obj:GetFullName())
+                    end
+                end
                 workspace.CurrentCamera.CFrame = CFrame.lookAt(
                     workspace.CurrentCamera.CFrame.Position,
                     heartPart.Position
@@ -13406,6 +18203,8 @@ __DIO_SafeLoop(function()
                     __DIO_wait(0.1)
                     VirtualInputManager:SendMouseButtonEvent(
                         screenPos.X, screenPos.Y, 0, false, game, 1)
+                else
+                    print("Not Have Heart Levi")
                 end
             end)
             isRunning = false
@@ -13742,6 +18541,7 @@ ChestEsp = function()
             pcall(function()
                 local chestPos = Chest:GetPivot().Position
                 local distanceMagnitude = (chestPos - plr.Character.Head.Position).Magnitude
+                local sanitizedFullName = Chest:GetFullName():gsub("[^%w_]", "_")
                 local existingEsp = Chest:FindFirstChild("ChestEspAttachment")
                 if not existingEsp then
                     local attachment = Instance.new("Attachment")
@@ -14055,6 +18855,7 @@ end
 __DIO_GachaRollOnce = function()
     if __DIO_GachaBusy then return false end
     __DIO_GachaBusy = true
+    local __rolled = false
     task.spawn(function()
         pcall(function()
             local mods = __DIO_GachaGetModules()
@@ -14107,6 +18908,7 @@ __DIO_GachaRollOnce = function()
                     if type(GachaWindow[method]) == "function" then
                         local ok = pcall(GachaWindow[method], GachaWindow, __DIO_GACHA_NAME, priceArg)
                         if ok then
+                            __rolled = true
                             return
                         end
                     end
@@ -14180,6 +18982,7 @@ __DIO_GachaRollOnce = function()
                 end
                 if clicked then break end
             end
+            __rolled = clicked
         end)
         __DIO_GachaBusy = false
     end)
@@ -14412,20 +19215,19 @@ __DIO_SafeLoop(function()
     local lastCand = nil
     local lastTry = 0
     while __DIO_wait(1) do
-        if _G.AutoChipFruit then
-            pcall(function()
-                if GetBP("Special Microchip") then return end
-                __RaidBuyEnsure()
-                local cand = __PickFruitForChip(490000)
-                if not cand then return end
-                if cand ~= lastCand or tick() - lastTry >= 4 then
-                    lastCand = cand
-                    lastTry = tick()
-                    replicated.Remotes.CommF_:InvokeServer("LoadFruit", tostring(cand))
-                    replicated.Remotes.CommF_:InvokeServer("RaidsNpc", "Select", _G.SelectChip)
-                end
-            end)
-        end
+        if not _G.AutoChipFruit then continue end
+        pcall(function()
+            if GetBP("Special Microchip") then return end
+            __RaidBuyEnsure()
+            local cand = __PickFruitForChip(490000)
+            if not cand then return end
+            if cand ~= lastCand or tick() - lastTry >= 4 then
+                lastCand = cand
+                lastTry = tick()
+                replicated.Remotes.CommF_:InvokeServer("LoadFruit", tostring(cand))
+                replicated.Remotes.CommF_:InvokeServer("RaidsNpc", "Select", _G.SelectChip)
+            end
+        end)
     end
 end, "L12540")
 StartR = Tabs.Raids:AddToggle({
@@ -14448,75 +19250,74 @@ __DIO_SafeLoop(function()
     local __raidFireCD = 0
     local __raidChipNotifyT = 0
     while __DIO_wait(0.5) do
-        if _G.Auto_StartRaid then
-            pcall(function()
-                local plr2 = game.Players.LocalPlayer
-                local char = plr2 and plr2.Character
-                local root = char and char:FindFirstChild("HumanoidRootPart")
-                if not root then return end
-                local gui = plr2:FindFirstChild("PlayerGui")
-                local main = gui and gui:FindFirstChild("Main")
-                local top = main and main:FindFirstChild("TopHUDList")
-                local raidTimer = top and top:FindFirstChild("RaidTimer")
-                if raidTimer and raidTimer.Visible then return end
-                local btn
-                if World2 then
-                    local ci = workspace.Map and workspace.Map:FindFirstChild("CircleIsland")
-                    local rs = ci and ci:FindFirstChild("RaidSummon2")
-                    local bt = rs and rs:FindFirstChild("Button")
-                    btn = bt and bt:FindFirstChild("Main")
-                elseif World3 then
-                    local bc = workspace.Map and workspace.Map:FindFirstChild("Boat Castle")
-                    local rs = bc and bc:FindFirstChild("RaidSummon2")
-                    local bt = rs and rs:FindFirstChild("Button")
-                    btn = bt and bt:FindFirstChild("Main")
+        if not _G.Auto_StartRaid then continue end
+        pcall(function()
+            local plr2 = game.Players.LocalPlayer
+            local char = plr2 and plr2.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if not root then return end
+            local gui = plr2:FindFirstChild("PlayerGui")
+            local main = gui and gui:FindFirstChild("Main")
+            local top = main and main:FindFirstChild("TopHUDList")
+            local raidTimer = top and top:FindFirstChild("RaidTimer")
+            if raidTimer and raidTimer.Visible then return end
+            local btn
+            if World2 then
+                local ci = workspace.Map and workspace.Map:FindFirstChild("CircleIsland")
+                local rs = ci and ci:FindFirstChild("RaidSummon2")
+                local bt = rs and rs:FindFirstChild("Button")
+                btn = bt and bt:FindFirstChild("Main")
+            elseif World3 then
+                local bc = workspace.Map and workspace.Map:FindFirstChild("Boat Castle")
+                local rs = bc and bc:FindFirstChild("RaidSummon2")
+                local bt = rs and rs:FindFirstChild("Button")
+                btn = bt and bt:FindFirstChild("Main")
+            end
+            local btnCF
+            if btn then
+                if btn:IsA("BasePart") then
+                    btnCF = btn.CFrame
+                elseif btn:IsA("Model") then
+                    btnCF = btn:GetPivot()
+                else
+                    local pp = btn:FindFirstChildWhichIsA("BasePart", true)
+                    if pp then btnCF = pp.CFrame end
                 end
-                local btnCF
-                if btn then
-                    if btn:IsA("BasePart") then
-                        btnCF = btn.CFrame
-                    elseif btn:IsA("Model") then
-                        btnCF = btn:GetPivot()
-                    else
-                        local pp = btn:FindFirstChildWhichIsA("BasePart", true)
-                        if pp then btnCF = pp.CFrame end
-                    end
+            end
+            if not btnCF then
+                if World1 and not __raidWarnedSea1 then
+                    __raidWarnedSea1 = true
+                    pcall(function() __DIO_TNotify("Auto Start Raid", "Sea 1 khong co Raid - sang Sea 2/3.", 4) end)
                 end
-                if not btnCF then
-                    if World1 and not __raidWarnedSea1 then
-                        __raidWarnedSea1 = true
-                        pcall(function() __DIO_TNotify("Auto Start Raid", "Sea 1 khong co Raid - sang Sea 2/3.", 4) end)
-                    end
-                    return
+                return
+            end
+            __raidWarnedSea1 = false
+            if not GetBP("Special Microchip") then
+                local standChip = btnCF * CFrame.new(0, 3, 0)
+                if (root.Position - standChip.Position).Magnitude > 12 then
+                    _tp(standChip)
                 end
-                __raidWarnedSea1 = false
-                if not GetBP("Special Microchip") then
-                    local standChip = btnCF * CFrame.new(0, 3, 0)
-                    if (root.Position - standChip.Position).Magnitude > 12 then
-                        _tp(standChip)
-                    end
-                    if tick() - __raidChipNotifyT > 15 then
-                        __raidChipNotifyT = tick()
-                        pcall(function() __DIO_TNotify("Auto Start Raid", "Chua co Special Microchip - bat 'Auto Buy Chip' de mua chip. Da den gan nut Raid, co chip se tu bat.", 4) end)
-                    end
-                    return
+                if tick() - __raidChipNotifyT > 15 then
+                    __raidChipNotifyT = tick()
+                    pcall(function() __DIO_TNotify("Auto Start Raid", "Chua co Special Microchip - bat 'Auto Buy Chip' de mua chip. Da den gan nut Raid, co chip se tu bat.", 4) end)
                 end
-                local standCF = btnCF * CFrame.new(0, 3, 0)
-                if (root.Position - standCF.Position).Magnitude > 12 then
-                    _tp(standCF)
-                    return
-                end
-                if tick() - __raidFireCD < 2 then return end
-                __raidFireCD = tick()
-                local prompt = btn:FindFirstChild("ProximityPrompt", true)
-                local clicker = btn:FindFirstChild("ClickDetector", true)
-                if prompt then
-                    fireproximityprompt(prompt)
-                elseif clicker then
-                    fireclickdetector(clicker)
-                end
-            end)
-        end
+                return
+            end
+            local standCF = btnCF * CFrame.new(0, 3, 0)
+            if (root.Position - standCF.Position).Magnitude > 12 then
+                _tp(standCF)
+                return
+            end
+            if tick() - __raidFireCD < 2 then return end
+            __raidFireCD = tick()
+            local prompt = btn:FindFirstChild("ProximityPrompt", true)
+            local clicker = btn:FindFirstChild("ClickDetector", true)
+            if prompt then
+                fireproximityprompt(prompt)
+            elseif clicker then
+                fireclickdetector(clicker)
+            end
+        end)
     end
 end, "L12578")
 Raiding = Tabs.Raids:AddToggle({
@@ -14537,68 +19338,65 @@ __DIO_SafeLoop(function()
     while __DIO_wait(1) do
         if not _G.Raiding then
             _G.KillAuraFull = false
-        else
-            local gui = plr.PlayerGui.Main.TopHUDList.RaidTimer
-            if not gui or not gui.Visible then
-                _G.KillAuraFull = false
-            else
-                local char = plr.Character
-                if char then
-                    local root = char:FindFirstChild("HumanoidRootPart")
-                    local hum = char:FindFirstChildOfClass("Humanoid")
-                    if root and hum and not (hum.Health <= 0) and not hum.Sit and not hum.PlatformStand and not root.Anchored then
-                        local closestDist = 999999
-                        for _, name in ipairs(islands) do
-                            local loc = locations:FindFirstChild(name)
-                            if loc then
-                                local dist = (root.Position - loc.Position).Magnitude
-                                if dist < closestDist then
-                                    closestDist = dist
-                                    currentIsland = name
-                                end
-                            end
-                        end
-                        if currentIsland then
-                            if currentIsland == "Island 4" or currentIsland == "Island 5" then
-                                _G.KillAuraFull = true
-                            else
-                                _G.KillAuraFull = false
-                            end
-                            local islandPos = locations:FindFirstChild(currentIsland)
-                            if islandPos then
-                                local foundEnemies = false
-                                for _, mob in ipairs(workspace.Enemies:GetChildren()) do
-                                    local eh = mob:FindFirstChild("Humanoid")
-                                    local ehrp = mob:FindFirstChild("HumanoidRootPart")
-                                    if eh and ehrp and eh.Health > 0 then
-                                        if (ehrp.Position - islandPos.Position).Magnitude < 450 then
-                                            foundEnemies = true
-                                            repeat
-                                                __DIO_wait(0.25)
-                                                Attack.Kill(mob, _G.Raiding)
-                                            until not _G.Raiding or not mob.Parent or eh.Health <= 0
-                                        end
-                                    end
-                                end
-                                if not foundEnemies then
-                                    if currentIsland == "Island 5" then
-                                        _G.KillAuraFull = false
-                                    end
-                                    local idx = table.find(islands, currentIsland)
-                                    if idx and islands[idx+1] then
-                                        local nxt = locations:FindFirstChild(islands[idx+1])
-                                        if nxt then
-                                            local safePos = nxt.CFrame * CFrame.new(0, 45, 120)
-                                            _tp(safePos)
-                                        end
-                                        currentIsland = islands[idx+1]
-                                        __DIO_wait(1)
-                                    end
-                                end
-                            end
-                        end
-                    end
+            continue
+        end
+        local gui = plr.PlayerGui.Main.TopHUDList.RaidTimer
+        if not gui or not gui.Visible then
+            _G.KillAuraFull = false
+            continue
+        end
+        local char = plr.Character
+        if not char then continue end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not root or not hum or hum.Health <= 0 then continue end
+        if hum.Sit or hum.PlatformStand or root.Anchored then continue end
+        local closestDist = 999999
+        for _, name in ipairs(islands) do
+            local loc = locations:FindFirstChild(name)
+            if loc then
+                local dist = (root.Position - loc.Position).Magnitude
+                if dist < closestDist then
+                    closestDist = dist
+                    currentIsland = name
                 end
+            end
+        end
+        if not currentIsland then continue end
+        if currentIsland == "Island 4" or currentIsland == "Island 5" then
+            _G.KillAuraFull = true
+        else
+            _G.KillAuraFull = false
+        end
+        local islandPos = locations:FindFirstChild(currentIsland)
+        if not islandPos then continue end
+        local foundEnemies = false
+        for _, mob in ipairs(workspace.Enemies:GetChildren()) do
+            local eh = mob:FindFirstChild("Humanoid")
+            local ehrp = mob:FindFirstChild("HumanoidRootPart")
+            if eh and ehrp and eh.Health > 0 then
+                if (ehrp.Position - islandPos.Position).Magnitude < 450 then
+                    foundEnemies = true
+                    repeat
+                        __DIO_wait(0.25)
+                        Attack.Kill(mob, _G.Raiding)
+                    until not _G.Raiding or not mob.Parent or eh.Health <= 0
+                end
+            end
+        end
+        if not foundEnemies then
+            if currentIsland == "Island 5" then
+                _G.KillAuraFull = false
+            end
+            local idx = table.find(islands, currentIsland)
+            if idx and islands[idx+1] then
+                local nxt = locations:FindFirstChild(islands[idx+1])
+                if nxt then
+                    local safePos = nxt.CFrame * CFrame.new(0, 45, 120)
+                    _tp(safePos)
+                end
+                currentIsland = islands[idx+1]
+                __DIO_wait(1)
             end
         end
     end
@@ -14734,31 +19532,30 @@ Tabs.Raids:AddToggle({
 local FARM_RANGE = 5000
 __DIO_SafeLoop(function()
     while __DIO_wait(1) do
-        if _G.AutoFarmDungeon then
-            pcall(function()
-                local plr = game.Players.LocalPlayer
-                local char = plr.Character
-                local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                local hum = char and char:FindFirstChildOfClass("Humanoid")
-                if not hrp or not hum or hum.Health <= 0 then return end
-                for _, mob in pairs(workspace.Enemies:GetChildren()) do
-                    if not _G.AutoFarmDungeon then break end
-                    local mh = mob:FindFirstChild("Humanoid")
-                    local mhrp = mob:FindFirstChild("HumanoidRootPart")
-                    if mh and mhrp and mh.Health > 0 then
-                        local dist = (mhrp.Position - hrp.Position).Magnitude
-                        if dist <= FARM_RANGE then
-                            repeat
-                                __DIO_wait(0.25)
-                                Attack.Kill(mob, true)
-                            until not _G.AutoFarmDungeon
-                                or not mob.Parent
-                                or mh.Health <= 0
-                        end
+        if not _G.AutoFarmDungeon then continue end
+        pcall(function()
+            local plr = game.Players.LocalPlayer
+            local char = plr.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if not hrp or not hum or hum.Health <= 0 then return end
+            for _, mob in pairs(workspace.Enemies:GetChildren()) do
+                if not _G.AutoFarmDungeon then break end
+                local mh = mob:FindFirstChild("Humanoid")
+                local mhrp = mob:FindFirstChild("HumanoidRootPart")
+                if mh and mhrp and mh.Health > 0 then
+                    local dist = (mhrp.Position - hrp.Position).Magnitude
+                    if dist <= FARM_RANGE then
+                        repeat
+                            __DIO_wait(0.25)
+                            Attack.Kill(mob, true)
+                        until not _G.AutoFarmDungeon
+                            or not mob.Parent
+                            or mh.Health <= 0
                     end
                 end
-            end)
-        end
+            end
+        end)
     end
 end, "L12890")
 Tabs.Raids:AddToggle({
@@ -14785,15 +19582,15 @@ __DIO_SafeLoop(function()
     while __DIO_wait(1) do
         if not _G.TPFloor1 then
             tp1Done = false
-        else
-            if not tp1Done then
-                local root = GetCurrentFloor()
-                if root then
-                    root = root.CFrame * CFrame.new(0,3,0)
-                    GetHRP().CFrame = root
-                    __DIO_TweenSet(GetHRP().CFrame)
-                    tp1Done = true
-                end
+            continue
+        end
+        if not tp1Done then
+            local root = GetCurrentFloor()
+            if root then
+                root = root.CFrame * CFrame.new(0,3,0)
+                GetHRP().CFrame = root
+                __DIO_TweenSet(GetHRP().CFrame)
+                tp1Done = true
             end
         end
     end
@@ -14810,22 +19607,20 @@ __DIO_SafeLoop(function()
     while __DIO_wait(1) do
         if not _G.TPFloor2 then
             tp2Done = false
-        else
-            if not tp2Done then
-                local hrp = GetHRP()
-                if hrp then
-                    for _, floor in pairs(workspace.Map.Dungeon:GetChildren()) do
-                        local ent = floor:FindFirstChild("EntranceTeleporter")
-                        local ext = floor:FindFirstChild("ExitTeleporter")
-                        if ent and ext and ent:FindFirstChild("Root") and ext:FindFirstChild("Root") then
-                            if (hrp.Position - ent.Root.Position).Magnitude < 100 then
-                                hrp.CFrame = ext.Root.CFrame * CFrame.new(0,3,0)
-                                __DIO_TweenSet(hrp.CFrame)
-                                tp2Done = true
-                                break
-                            end
-                        end
-                    end
+            continue
+        end
+        if tp2Done then continue end
+        local hrp = GetHRP()
+        if not hrp then continue end
+        for _, floor in pairs(workspace.Map.Dungeon:GetChildren()) do
+            local ent = floor:FindFirstChild("EntranceTeleporter")
+            local ext = floor:FindFirstChild("ExitTeleporter")
+            if ent and ext and ent:FindFirstChild("Root") and ext:FindFirstChild("Root") then
+                if (hrp.Position - ent.Root.Position).Magnitude < 100 then
+                    hrp.CFrame = ext.Root.CFrame * CFrame.new(0,3,0)
+                    __DIO_TweenSet(hrp.CFrame)
+                    tp2Done = true
+                    break
                 end
             end
         end
@@ -14853,16 +19648,16 @@ __DIO_SafeLoop(function()
     while __DIO_wait(1) do
         if not _G.TPFloor3 then
             tp3Done = false
-        else
-            if not tp3Done then
-                local floor = GetHighestFloor()
-                if floor and floor:FindFirstChild("ExitTeleporter")
-                and floor.ExitTeleporter:FindFirstChild("Root") then
-                    GetHRP().CFrame =
-                        floor.ExitTeleporter.Root.CFrame * CFrame.new(0,3,0)
-                    __DIO_TweenSet(GetHRP().CFrame)
-                    tp3Done = true
-                end
+            continue
+        end
+        if not tp3Done then
+            local floor = GetHighestFloor()
+            if floor and floor:FindFirstChild("ExitTeleporter")
+            and floor.ExitTeleporter:FindFirstChild("Root") then
+                GetHRP().CFrame =
+                    floor.ExitTeleporter.Root.CFrame * CFrame.new(0,3,0)
+                __DIO_TweenSet(GetHRP().CFrame)
+                tp3Done = true
             end
         end
     end
@@ -14895,14 +19690,14 @@ __DIO_SafeLoop(function()
     while __DIO_wait(1) do
         if not _G.TPFloor4 then
             tp4Done = false
-        else
-            if not tp4Done then
-                local root = GetNearestExit()
-                if root then
-                    GetHRP().CFrame = root.CFrame * CFrame.new(0,3,0)
-                    __DIO_TweenSet(GetHRP().CFrame)
-                    tp4Done = true
-                end
+            continue
+        end
+        if not tp4Done then
+            local root = GetNearestExit()
+            if root then
+                GetHRP().CFrame = root.CFrame * CFrame.new(0,3,0)
+                __DIO_TweenSet(GetHRP().CFrame)
+                tp4Done = true
             end
         end
     end
@@ -15159,6 +19954,7 @@ __DIO_SafeLoop(function()
 end, "L13351")
 Tabs.Combat:AddSection("LocalPlayer Settings")
 local Players = __SVC_PLR
+local UserInputService = game:GetService("UserInputService")
 local RunService = __SVC_RUN
 local player = Players.LocalPlayer
 local flying = false
@@ -15309,6 +20105,21 @@ Tabs.Combat:AddToggle({
         getgenv().DodgeNoCD = Value
     end
 })
+local function NoCooldown()
+    local dodgeScript = game.Players.LocalPlayer.Character:WaitForChild("Dodge")
+    for i, v in next, getgc() do
+        if typeof(v) == "function" then
+            local funcEnv = getfenv(v)
+            if funcEnv.script == dodgeScript then
+                for i2, v2 in next, getupvalues(v) do
+                    if tostring(v2) == "0.4" then
+                        setupvalue(v, i2, 0)
+                    end
+                end
+            end
+        end
+    end
+end
 Tabs.Combat:AddToggle({
     Name = __DIO_T["Instance Mink V3 [ INF ]"],
     Description = "",
@@ -15514,6 +20325,18 @@ Description = "",
 Callback = function()
   replicated.Remotes.CommF_:InvokeServer("KenTalk","Buy")
 end})
+FindMeleeNPC = function(npcNames)
+    local npcsFolder = workspace:FindFirstChild("NPCs")
+    if not npcsFolder then return nil end
+    for __, wanted in ipairs(npcNames) do
+        for ___, npc in pairs(npcsFolder:GetChildren()) do
+            if npc.Name == wanted and npc:FindFirstChild("HumanoidRootPart") then
+                return npc
+            end
+        end
+    end
+    return nil
+end
 local __DIO_BUY_MELEE_CF = {
     ["BuyBlackLeg"] = {
         sea1 = CFrame.new(-983.617981, 12.449997, 3990.462891, 0.358573, 0.000000, 0.933502, 0.000000, 1.000000, 0.000000, -0.933502, 0.000000, 0.358573),
@@ -16684,7 +21507,7 @@ task.spawn(function()
         __DIO_LastGM = tick()
         __DIO_GMa, __DIO_GMb = get_Monster()
       end
-      local MobAura = __DIO_GMa
+      local MobAura, Mon = __DIO_GMa, __DIO_GMb
       if ToolTip == "Blox Fruit" then
         if MobAura then
           local LeftClickRemote = Pretool:FindFirstChild('LeftClickRemote');
@@ -16816,6 +21639,32 @@ getLeviathanHeart = function()
     end
     return nil, nil
 end
+local function CheckInventoryNew(name)
+    if ItemReplicationService and ItemReplicationService.IsInitialized then
+        local ItemData = {}
+        local okItems, Items = pcall(function() return ItemReplicationService:GetItems(KEYS.QUANTITY) end) 
+        if okItems and type(Items) == "table" then
+        for _, v in pairs(Items) do
+            local success, dataItem = pcall(function()
+                return v.ItemId.getDataFromId(v.ItemId):unwrap()
+            end)
+            if success and dataItem then
+                table.insert(ItemData, {
+                    Name = dataItem.StorageKey,
+                    Count = v.Value or 0,
+                    Type = dataItem.Type
+                })
+            end
+        end
+        end 
+        for _, v in pairs(ItemData) do
+            if v and v.Name == name and v.Count >= 1 then
+                return true
+            end
+        end
+    end
+    return false
+end
 Window:Notify({
   Title = "DIO hub",
   Content = "DIO Hub Load....",
@@ -16837,7 +21686,7 @@ end
 __DIO_QueueAutoExec = function()
     if getgenv().AutoExecutor ~= true then return end
     local __url = getgenv().DIO_SelfUrl
-        or "https://raw.githubusercontent.com/huw8592-rgb181816aajbbvaa838377hbba/Script-----------------/refs/heads/main/DIO_Hub.lua"
+        or "https://raw.githubusercontent.com/DIO482/Script-/refs/heads/main/DIO_Hub_Fixed%20(1)(6)%20FIXED.txt"
     local __esc = function(v)
         return tostring(v or ""):gsub("\\", "\\\\"):gsub('"', '\\"')
     end
@@ -16897,7 +21746,7 @@ else
         Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
     end)
     if not okFluent or not Fluent then
-        warn("[DIO] Failed to load Fluent UI, loading hub anyway for debug: " .. tostring(errFluent))
+        warn("[DIO] Failed to load Fluent UI, loading hub anyway for debug")
         __DIO_SafeStart("fluent-fallback")
         return
     end
@@ -17008,6 +21857,7 @@ else
         end
     })
 
+    -- [KEY-FIX] 2 nut tien ich: xoa cache key + test Api (in log ra console F9)
     Tabs.GetKey:AddButton({
         Title = "Xoa cache Key (Reset)",
         Description = "Xoa KeyCache.json + getgenv().Key de nhap lai key moi",
@@ -17017,6 +21867,23 @@ else
                 Title = "Da xoa cache key",
                 Content = "Nhap key moi roi bam Check Key.",
                 Duration = 5
+            })
+        end
+    })
+    Tabs.GetKey:AddButton({
+        Title = "Test Api (xem log F9)",
+        Description = "In ra console: Api tra ve gi, cache dang luu gi",
+        Callback = function()
+            local data = _DIO_ResolvePendingFromPastefy()
+            print("[DIO KEY][TEST] Online=" .. tostring(_DIO_ApiOnline)
+                .. " | Keys=" .. table.concat(_DIO_ApiKeys, " | ")
+                .. " | Pending=" .. tostring(_DIO_PendingKey))
+            print("[DIO KEY][TEST] Raw=" .. tostring(_DIO_ApiRaw):sub(1, 300))
+            print("[DIO KEY][TEST] " .. _DIO_KeyStatusText():gsub("\n", " | "))
+            Fluent:Notify({
+                Title = "Test Api xong",
+                Content = _DIO_ApiOnline and "Api doc duoc - xem console (F9)" or "KHONG doc duoc Api - xem console (F9)",
+                Duration = 6
             })
         end
     })
