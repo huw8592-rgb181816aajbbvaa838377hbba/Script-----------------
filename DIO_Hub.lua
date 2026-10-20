@@ -3825,7 +3825,7 @@ __DIO_BOOT("Load Hub 80%")
 local redzlib, __DIO_libErr
 local __DIO_LIB_URLS = {
     "https://raw.githubusercontent.com/huw8592-rgb181816aajbbvaa838377hbba/Script-----------------/refs/heads/main/Library-Redz-Pulic-Source.lua",
-    "https://cdn.jsdelivr.net/gh/DIO482/Script-@main/Library-Redz-Pulic-Source.txt"
+    "https://raw.githubusercontent.com/tlredz/Library/refs/heads/main/redz-V5-remake/main.luau"
 }
 local function __DIO_RobustGet(url)
     local sep = url:find("?",1,true) and "&" or "?"
@@ -16779,7 +16779,7 @@ end
 __DIO_QueueAutoExec = function()
     if getgenv().AutoExecutor ~= true then return end
     local __url = getgenv().DIO_SelfUrl
-        or ""
+        or "https://raw.githubusercontent.com/huw8592-rgb181816aajbbvaa838377hbba/Script-----------------/refs/heads/main/DIO_Hub.lua"
     local __esc = function(v)
         return tostring(v or ""):gsub("\\", "\\\\"):gsub('"', '\\"')
     end
