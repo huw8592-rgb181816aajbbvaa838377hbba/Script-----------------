@@ -78,31 +78,30 @@ local function _DIO_Bust(url)
     return url .. sep .. "t=" .. tostring(os.time()) .. "&r=" .. tostring(math.random(100000, 999999))
 end
 
+-- [DIO FIX] Thu `request` TRUOC: day la ham thuong cua executor, khong bi hook
+-- __namecall / clonefunction ma chinh hub cai vao `game` dong vao.
+-- Sau do moi toi game:HttpGet(url) dung chuan (ban cu truyen "game" 2 lan).
 local function _DIO_HttpGet(url)
     local out = nil
-    pcall(function()
-        local raw = _DIO_RawHttpGet(game, url, true)
-        if type(raw) == "string" and #raw > 0 then out = raw end
-    end)
-    if type(out) == "string" and #out > 0 then return out end
+    local function take(v) if type(v) == "string" and #v > 0 then out = v end end
     pcall(function()
         local reqFn = (syn and syn.request) or (http and http.request) or http_request or request
         if type(reqFn) == "function" then
             local res = reqFn({ Url = url, Method = "GET" })
-            local body = nil
-            if type(res) == "table" then body = res.Body or res.body end
-            if type(body) == "string" and #body > 0 then out = body end
+            if type(res) == "table" then take(res.Body or res.body) end
         end
     end)
-    if type(out) == "string" and #out > 0 then return out end
+    if out then return out end
+    pcall(function() take(game:HttpGet(url)) end)
+    if out then return out end
+    pcall(function() take(game:HttpGet(url, true)) end)
+    if out then return out end
     pcall(function()
-        if type(game.HttpGetAsync) == "function" then
-            local raw = game:HttpGetAsync(url)
-            if type(raw) == "string" and #raw > 0 then out = raw end
-        end
+        if type(game.HttpGetAsync) == "function" then take(game:HttpGetAsync(url)) end
     end)
-    if type(out) == "string" and #out > 0 then return out end
-    return nil
+    if out then return out end
+    pcall(function() take(_DIO_RawHttpGet(game, url)) end)
+    return out
 end
 
 local function _DIO_TryPastefy(url, tag)
@@ -3823,53 +3822,194 @@ QuestNeta = function()
 end
 __DIO_BOOT("Load Hub 80%")
 local redzlib, __DIO_libErr
+-- ==========================================================================
+-- [DIO FIX v3] LIBRARY LOADER
+-- 1) Tai tu NHIEU host khac nhau (khong con canh "2 link du phong cung 1 host")
+-- 2) Uu tien `request` -> khong bi hook __namecall / clonefunction cua hub dong vao
+-- 3) Cache file xuong may -> lan sau khong can mang van mo duoc UI
+-- 4) Tach ro "tai that bai" vs "tai duoc nhung library loi khi chay"
+-- ==========================================================================
+local __DIO_LIB_CACHE = SAVE_FOLDER .. "/Library_v5.lua"
+local __DIO_LIB_STAMP = SAVE_FOLDER .. "/Library_v5.time"
+local __DIO_LIB_TTL   = 6 * 60 * 60
+local __DIO_LIB_LOG   = {}
+
 local __DIO_LIB_URLS = {
-    "https://raw.githubusercontent.com/huw8592-rgb181816aajbbvaa838377hbba/Script-----------------/refs/heads/main/Library-Redz-Pulic-Source.lua",
-    "https://raw.githubusercontent.com/tlredz/Library/refs/heads/main/redz-V5-remake/main.luau"
+    -- (1) jsDelivr: host KHAC hoan toan raw.githubusercontent.com, CDN toan cau
+    { "jsdelivr-reskin",   "https://cdn.jsdelivr.net/gh/huw8592-rgb181816aajbbvaa838377hbba/Script-----------------@main/Library-Redz-Pulic-Source.lua" },
+    { "jsdelivr-official", "https://cdn.jsdelivr.net/gh/tlredz/Library@main/redz-V5-remake/main.luau" },
+    -- (2) Proxy GitHub / githack: dung khi ISP chan raw
+    { "ghproxy-official",  "https://gh-proxy.com/https://raw.githubusercontent.com/tlredz/Library/refs/heads/main/redz-V5-remake/main.luau" },
+    { "githack-official",  "https://raw.githack.com/tlredz/Library/main/redz-V5-remake/main.luau" },
+    -- (3) GitHub raw truc tiep (2 link cu, de cuoi vi hay bi chan nhat)
+    { "raw-reskin",        "https://raw.githubusercontent.com/huw8592-rgb181816aajbbvaa838377hbba/Script-----------------/refs/heads/main/Library-Redz-Pulic-Source.lua" },
+    { "raw-official",      "https://raw.githubusercontent.com/tlredz/Library/refs/heads/main/redz-V5-remake/main.luau" },
 }
-local function __DIO_RobustGet(url)
-    local sep = url:find("?",1,true) and "&" or "?"
-    local bust = sep .. "t=" .. tostring(os.time()) .. "&r=" .. tostring(math.random(100000,999999))
-    url = url .. bust
-    local out=nil
-    pcall(function()
-        local raw = game:HttpGet(game, url, true)
-        if type(raw)=="string" and #raw>100 then out=raw end
-    end)
-    if out then return out end
-    pcall(function()
-        local reqFn=(syn and syn.request) or (http and http.request) or http_request or request
-        if type(reqFn)=="function" then
-            local res=reqFn({Url=url, Method="GET"})
-            local body=res and (res.Body or res.body)
-            if type(body)=="string" and #body>100 then out=body end
-        end
-    end)
-    if out then return out end
-    pcall(function()
-        if type(game.HttpGetAsync)=="function" then
-            local raw=game:HttpGetAsync(game, url)
-            if type(raw)=="string" and #raw>100 then out=raw end
-        end
-    end)
-    return out
+
+local function __DIO_LibLog(tag, msg)
+    local line = tostring(tag) .. " -> " .. tostring(msg)
+    table.insert(__DIO_LIB_LOG, line)
+    __DIO_libErr = line
+    pcall(function() warn("[DIO LIB] " .. line) end)
 end
-for _, __DIO_libURL in ipairs(__DIO_LIB_URLS) do
-    local __ok, __res = pcall(function()
-        local src = __DIO_RobustGet(__DIO_libURL)
-        assert(type(src)=="string" and #src>100, "HttpGet rỗng/404")
-        local fn,err=loadstring(src)
-        assert(fn, "loadstring lỗi: "..tostring(err))
-        return fn()
-    end)
-    if __ok and __res ~= nil then
-        redzlib = __res
-        break
+
+local function __DIO_HttpGetSafe(u)
+    local out, code = nil, nil
+    local function take(v, c)
+        if type(v) == "string" and #v > 0 then out = v; code = c end
     end
-    __DIO_libErr = "[" .. tostring(__DIO_libURL:match("https?://([^/]+)")) .. "] " .. tostring(__res)
+    -- (1) request cua executor - ham thuong, khong dinh hook __namecall cua hub
+    pcall(function()
+        local reqFn = (syn and syn.request) or (http and http.request) or http_request or request
+        if type(reqFn) == "function" then
+            local res = reqFn({ Url = u, Method = "GET" })
+            if type(res) == "table" then
+                take(res.Body or res.body, tonumber(res.StatusCode or res.status or res.Status))
+            end
+        end
+    end)
+    if out then return out, code end
+    pcall(function() take(game:HttpGet(u)) end)
+    if out then return out, code end
+    pcall(function() take(game:HttpGet(u, true)) end)
+    if out then return out, code end
+    pcall(function()
+        if type(game.HttpGetAsync) == "function" then take(game:HttpGetAsync(u)) end
+    end)
+    if out then return out, code end
+    pcall(function() take(_DIO_RawHttpGet(game, u)) end)
+    return out, code
 end
+
+-- Kiem tra noi dung tai ve co phai Lua that khong (tranh HTML/JSON cua ISP, Cloudflare)
+local function __DIO_LibCheck(body)
+    if type(body) ~= "string" then return false, "khong tai duoc (mang chet / executor chan host nay)" end
+    local head = body:sub(1, 512):lower()
+    if head:find("<!doctype", 1, true) or head:find("<html", 1, true) or head:find("<head", 1, true) then
+        return false, "nhan ve HTML (bi chan / trang chen cua mang / Cloudflare)"
+    end
+    if head:gsub("^%s+", ""):sub(1, 1) == "{" then
+        return false, "nhan ve JSON loi thay vi Lua"
+    end
+    if #body < 2000 then return false, "qua ngan (" .. tostring(#body) .. " byte)" end
+    if not body:find("MakeWindow", 1, true) then
+        return false, "khong phai file library (thieu MakeWindow)"
+    end
+    return true
+end
+
+local function __DIO_LibRun(body, tag)
+    local fn, cerr = loadstring(body, "=DIO_Library")
+    if type(fn) ~= "function" then
+        return nil, "compile loi: " .. tostring(cerr)
+    end
+    local ok, res = pcall(fn)
+    if not ok then
+        return nil, "tai OK nhung CHAY loi: " .. tostring(res)
+    end
+    if type(res) ~= "table" or type(res.MakeWindow) ~= "function" then
+        return nil, "library tra ve " .. type(res) .. " (khong co MakeWindow)"
+    end
+    return res
+end
+
+local function __DIO_LibCacheAge()
+    if type(readfile) ~= "function" or type(isfile) ~= "function" then return nil end
+    local ok, t = pcall(function()
+        if isfile(__DIO_LIB_STAMP) then return tonumber(readfile(__DIO_LIB_STAMP)) end
+    end)
+    if ok and t then return os.time() - t end
+    return nil
+end
+
+local function __DIO_LibFromCache()
+    if type(readfile) ~= "function" or type(isfile) ~= "function" then return nil end
+    local ok, body = pcall(function()
+        if isfile(__DIO_LIB_CACHE) then return readfile(__DIO_LIB_CACHE) end
+    end)
+    if not ok or type(body) ~= "string" then return nil end
+    local okc, why = __DIO_LibCheck(body)
+    if not okc then __DIO_LibLog("cache", why); return nil end
+    local lib, cerr = __DIO_LibRun(body, "cache")
+    if not lib then __DIO_LibLog("cache", cerr); return nil end
+    return lib
+end
+
+local function __DIO_LibSaveCache(body)
+    if type(writefile) ~= "function" then return end
+    pcall(function()
+        if type(makefolder) == "function" and (type(isfolder) ~= "function" or not isfolder(SAVE_FOLDER)) then
+            pcall(makefolder, SAVE_FOLDER)
+        end
+        writefile(__DIO_LIB_CACHE, body)
+        writefile(__DIO_LIB_STAMP, tostring(os.time()))
+    end)
+end
+
+-- Seed icon: library tu tai Icons.lua tu raw.githubusercontent (host hay bi chan).
+-- Ghi san tu jsDelivr de icon van hien du raw chet. Chi chay khi mang dang song.
+local function __DIO_SeedIcons()
+    pcall(function()
+        if type(writefile) ~= "function" or type(isfile) ~= "function" then return end
+        local folder, path = "dio", "dio/Icons.lua"
+        if isfile(path) then return end
+        local body = __DIO_HttpGetSafe("https://cdn.jsdelivr.net/gh/tlredz/Library@main/redz-V5-remake/Utils/Icons.lua")
+        if type(body) ~= "string" or #body < 1000 then return end
+        if type(makefolder) == "function" and (type(isfolder) ~= "function" or not isfolder(folder)) then
+            pcall(makefolder, folder)
+        end
+        writefile(path, body)
+    end)
+end
+
+do
+    local force = false
+    pcall(function() force = getgenv().DIO_ForceRedownload == true end)
+    local age = __DIO_LibCacheAge()
+
+    if (not force) and age and age < __DIO_LIB_TTL then
+        redzlib = __DIO_LibFromCache()
+        if redzlib then __DIO_BOOT("Library: cache may") end
+    end
+
+    if not redzlib then
+        for _, src in ipairs(__DIO_LIB_URLS) do
+            local tag, u = tostring(src[1]), tostring(src[2])
+            local body, code = __DIO_HttpGetSafe(u)
+            local okBody, why = __DIO_LibCheck(body)
+            if not okBody then
+                if code then why = "HTTP " .. tostring(code) .. " | " .. why end
+                __DIO_LibLog(tag, why)
+            else
+                local lib, cerr = __DIO_LibRun(body, tag)
+                if lib then
+                    redzlib = lib
+                    __DIO_BOOT("Library OK: " .. tag)
+                    __DIO_LibSaveCache(body)
+                    __DIO_SeedIcons()
+                    break
+                end
+                __DIO_LibLog(tag, cerr)
+            end
+        end
+    end
+
+    if not redzlib then
+        redzlib = __DIO_LibFromCache()
+        if redzlib then
+            __DIO_BOOT("Library: cache cu (offline)")
+            __DIO_LibLog("cache", "dung ban cache cu vi moi nguon mang deu loi")
+        end
+    end
+end
+
+pcall(function() getgenv().DIO_LibraryLog = __DIO_LIB_LOG end)
+
 if redzlib == nil then
-    local __msg = "Khong tai duoc Library! Doi DNS 1.1.1.1 / doi mang roi chay lai.\nChi tiet: " .. tostring(__DIO_libErr)
+    local __detail = table.concat(__DIO_LIB_LOG, "\n")
+    if #__detail > 800 then __detail = __detail:sub(1, 800) .. "\n..." end
+    local __msg = "Khong tai duoc Library UI.\n" .. __detail
+        .. "\n\nGoi y: doi DNS 1.1.1.1 / doi mang 4G-WiFi roi chay lai (ban nay co cache, lan sau se nhanh hon)."
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", {
             Title = "DIO Hub - Loi tai Library",
@@ -3884,11 +4024,11 @@ if redzlib == nil then
         __sg.ResetOnSpawn = false
         __sg.Parent = __pg
         local __fr = Instance.new("TextButton")
-        __fr.Size = UDim2.fromOffset(420, 150)
-        __fr.Position = UDim2.new(0.5, -210, 0.4, -75)
+        __fr.Size = UDim2.fromOffset(470, 240)
+        __fr.Position = UDim2.new(0.5, -235, 0.4, -120)
         __fr.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
         __fr.TextColor3 = Color3.fromRGB(255, 120, 120)
-        __fr.TextSize = 14
+        __fr.TextSize = 13
         __fr.TextWrapped = true
         __fr.Font = Enum.Font.Code
         __fr.Text = "DIO HUB - LIBRARY LOAD FAILED (bam de tat)\n\n" .. __msg
@@ -3897,7 +4037,7 @@ if redzlib == nil then
             __sg:Destroy()
         end)
     end)
-    error("[DIO] redzlib load failed: " .. tostring(__DIO_libErr))
+    error("[DIO] redzlib load failed:\n" .. table.concat(__DIO_LIB_LOG, "\n"))
 end
 
 -- [FIX] Shim tương thích: nếu code cũ còn dùng SaveFolder thì tự map sang ScriptFolder (giữ nguyên tên hub/tab)
@@ -16836,7 +16976,21 @@ if isKeyValid() then
 else
     local Fluent
     local okFluent, errFluent = pcall(function()
-        Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+        local __fluentUrls = {
+            "https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua",
+            "https://gh-proxy.com/https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua",
+        }
+        for _, __fu in ipairs(__fluentUrls) do
+            local __fsrc = _DIO_HttpGet(__fu)
+            if type(__fsrc) == "string" and #__fsrc > 1000 then
+                local __ffn = loadstring(__fsrc)
+                if type(__ffn) == "function" then
+                    Fluent = __ffn()
+                    if Fluent then break end
+                end
+            end
+        end
+        if not Fluent then error("khong tai duoc Fluent tu moi nguon") end
     end)
     if not okFluent or not Fluent then
         warn("[DIO] Failed to load Fluent UI, loading hub anyway for debug: " .. tostring(errFluent))
