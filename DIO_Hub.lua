@@ -2229,6 +2229,21 @@ gg.__namecall = newcclosure(function(...)
     end
   return old(...)
 end)
+-- [DIO FIX] Tu kiem tra hook: neu __namecall lam hong game:Method() (vd Arceus X) thi go hook ra
+local __hookOk = pcall(function()
+  local p = game:GetService("Players")
+  local h = game:GetService("HttpService")
+  assert(game:IsLoaded() ~= nil)
+  assert(game:FindFirstChild("Workspace") ~= nil)
+  assert(workspace:FindFirstChild("Terrain") ~= nil)
+  assert(type(h:GenerateGUID(false)) == "string")
+  assert(p ~= nil)
+end)
+if not __hookOk then
+  pcall(function() gg.__namecall = old end)
+  pcall(function() getgenv().DIO_NamecallHookDisabled = true end)
+  pcall(function() warn("[DIO] __namecall hook gay loi tren executor nay -> da go hook (mat aim skill MousePos, cac tinh nang khac van chay)") end)
+end
 end)
 GetConnectionEnemies = function(a)
   for i,v in pairs(replicated:GetChildren()) do
@@ -3830,11 +3845,7 @@ local __DIO_LIB_URLS = {
     "https://cdn.jsdelivr.net/gh/huw8592-rgb181816aajbbvaa838377hbba/Script-----------------@main/Library-Redz-Pulic-Source.lua",
     "https://cdn.jsdelivr.net/gh/tlredz/Library@main/redz-V5-remake/main.luau"
 }
--- [FIX] Truoc day goi `game:HttpGet(game, url, true)` / `game:HttpGetAsync(game, url)`:
--- dau `:` da tu truyen `game` lam self, nen them `game` lan nua => executor bao
--- "Trying to call method on object of type: 'DataModel' with incorrect arguments"
--- va MOI lan tai deu that bai (link chinh lan link phu), du link con song.
--- Gio goi dung cu phap + ghi lai loi cua tung cach de biet chinh xac buoc nao hong.
+
 local function __DIO_RobustGet(url, log)
     if url:find("raw.githubusercontent.com", 1, true) then
         local sep = url:find("?", 1, true) and "&" or "?"
