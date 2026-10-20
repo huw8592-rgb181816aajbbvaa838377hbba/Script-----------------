@@ -702,6 +702,19 @@ __DIO_SafeLoop = function(fn, tag)
         end
     end)
 end
+__DIO_PcallLogLast = {}
+__DIO_PcallLog = function(tag, fn)
+    local __okPL, __errPL = pcall(fn)
+    if not __okPL then
+        local __msgPL = tostring(__errPL)
+        local __recPL = __DIO_PcallLogLast[tag]
+        if not __recPL or __recPL.msg ~= __msgPL or tick() - __recPL.t > 10 then
+            __DIO_PcallLogLast[tag] = { msg = __msgPL, t = tick() }
+            warn(("[DIO] %s error: %s"):format(tostring(tag), __msgPL))
+        end
+    end
+    return __okPL
+end
 __DIO_FlagWant    = {}
 __DIO_FlagSup     = {}
 __DIO_OwnerAlive  = {}
@@ -10854,7 +10867,7 @@ end})
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if _G.FindMirage then
-      pcall(function()
+      __DIO_PcallLog("FindMirage", function()
         local __wo = workspace:FindFirstChild("_WorldOrigin")
         local __loc = __wo and __wo:FindFirstChild("Locations")
         local __found = __loc and __loc:FindFirstChild("Mirage Island", true)
@@ -12059,7 +12072,7 @@ Tabs.Prehistoric:AddToggle({
 })
 __DIO_SafeLoop(function()
     while __DIO_wait(Sec) do
-        pcall(function()
+        __DIO_PcallLog("FindPrehistoric", function()
             if _G.Prehis_Find then
                 local char = plr.Character
                 if not char then return end
@@ -12568,6 +12581,8 @@ Tabs.SeaEvent:AddSlider({
         _G.DodgeHeight = tonumber(Value) or 200
     end
 })
+_G.SeaTeleportY = math.clamp(math.floor(tonumber(GetSetting("UI/SeaEvent/" .. __DIO_T["Teleport Y boat If have Sea Event (ALL)"], 150)) or 150), 150, 600)
+_G.FlyBoatY = math.clamp(math.floor(tonumber(GetSetting("UI/SeaEvent/" .. __DIO_T["Fly Boat"], 150)) or 150), 30, 500)
 Tabs.SeaEvent:AddSlider({
     Name = __DIO_T["Teleport Y boat If have Sea Event (ALL)"],
     Min = 150,
@@ -12889,7 +12904,7 @@ end})
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if _G.AutofindKitIs then
-      pcall(function()
+      __DIO_PcallLog("FindKitsune", function()
         local __wo = workspace:FindFirstChild("_WorldOrigin")
         local __loc = __wo and __wo:FindFirstChild("Locations")
         local __found = __loc and __loc:FindFirstChild("Kitsune Island", true)
@@ -13283,7 +13298,7 @@ Tabs.SeaEvent:AddToggle({
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if _G.FrozenDimension then
-      pcall(function()
+      __DIO_PcallLog("FindFrozen", function()
         local __wo = workspace:FindFirstChild("_WorldOrigin")
         local __loc = __wo and __wo:FindFirstChild("Locations")
         local __found = __loc and __loc:FindFirstChild("Frozen Dimension", true)
