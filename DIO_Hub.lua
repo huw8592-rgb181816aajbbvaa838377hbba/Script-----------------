@@ -1215,15 +1215,7 @@ __DIO_TweenKill = function(keepHighlight, force)
     end)
     if keepHighlight ~= true then pcall(function() if type(__DIO_HlOff) == "function" then __DIO_HlOff() end end) end
 end
--- ================= FIX bug "Treo" =================
--- 1) Owner reaper: owner la ten 1 flag (vd "Auto_Yama", "Auto_SuperHuman", "Dojoo") da muon
---    flag khac (FarmEliteHunt / Level / SailBoats...). Neu owner da TAT (flag owner ~= true) ma
---    chua tra flag (loop dang giua vong lap thi goi Borrow lai sau khi toggle tat) -> flag muon
---    bi ket true mai mai -> highlight + shouldTween khong bao gio tat. Reaper tra lai ngay.
---    Owner "UI:<key>" cua toggle da tat cung duoc don.
--- 2) Off-edge: khi KHONG con feature nao bat -> sau 1.5s ep huy toan bo tween + highlight,
---    va trong 6s tiep theo chan cac lenh _tp "tre" cua loop vua tat (race giua vong lap).
--- 3) Stale: khong feature nao bat, khong co _tp moi > 20s ma van con mover/shouldTween -> huy.
+
 __DIO_OwnerIsFlag = function(owner)
     if type(owner) ~= "string" then return false end
     if owner:sub(1, 3) == "UI:" or owner:sub(1, 3) == "UI/" then return false end
@@ -1319,10 +1311,7 @@ __DIO_RealFarmOn = function()
     end)
     return (ok and any) and true or false
 end
--- ===== helper chung cho toggle co tween rieng: du 3 lop _G. flag + shouldTween + highlight =====
--- BAT : _G.<flag> = true (+ getgenv neu co), shouldTween = true, highlight NGAY, wake loop.
--- TAT : _G.<flag> = false, tra moi flag da muon (ReleaseAll), huy FlyTo dang bay,
---       neu khong con feature nao -> huy tween + shouldTween = false + tat highlight.
+
 __DIO_FeatToggle = function(flag, on)
     on = (on == true)
     pcall(__DIO_FlagSet, flag, on)
@@ -1363,14 +1352,8 @@ __DIO_Watchdog = function()
     pcall(__DIO_TweenDropPending)
     if __DIO_FlyBusy == true and __DIO_FlyBusyT ~= nil and (tick() - __DIO_FlyBusyT) > 360 then __DIO_FlyBusy = false end
     pcall(__DIO_TweenSync)
-    -- FIX bug "treo": shouldTween / highlight bi ket true maii (farm ~30p roi tat toggle).
-    -- Neu khong co feature nao bat, khong co _tp moi, va mover cua engine khong tien trien
-    -- -> ep huy toan bo tween + tat highlight.
     pcall(function()
         if __DIO_FlyBusy == true then return end
-        -- FIX: feature con BAT nhung "ban" (khong co _tp moi > 12s) van phai kiem tra mover ket:
-        -- truoc day chi can 1 feature bat la bo qua -> mover thua (cua toggle vua tat) tween mai mai,
-        -- highlight + shouldTween treo true. Gio chi bo qua khi feature BAT va DANG ra lenh di chuyen.
         if type(__DIO_AnyFeatureOn) == "function" and __DIO_AnyFeatureOn()
            and (type(__DIO_MoveFresh) == "function" and __DIO_MoveFresh()) then
             __DIO_StuckN = 0 __DIO_StuckD = nil return
@@ -3273,7 +3256,7 @@ do
 
     local function log(...)
         if Engine.Debug then
-            print("[DIO-3nnTween]", ...)
+            print("[DIO-You gay]", ...)
         end
     end
 
@@ -4527,21 +4510,7 @@ __DIO_BoatAssist = function()
     _tp(__seat.CFrame * CFrame.new(0, 1, 0))
     return "goSeat"
 end
--- ============================================================================
--- [DIO-FIX] HE THONG Y THUYEN - MOT NGUON QUYET DINH DUY NHAT (chong giat Y 31)
--- Quy tac:
---  * Slider "Fly Boat" (_G.FlyBoatY): CHI ap dung cho 4 Find
---    (Frozen Dimension / Kitsune / Prehistoric / Mirage). KHONG ap dung
---    Auto Sea Event (Auto Sea Event luon giu Y 31 nhu cu).
---  * Toggle "Teleport Y boat using a slider" (_G.TeleportYSlider) + Slider
---    "Teleport Y boat If have Sea Event (ALL)" (_G.SeaTeleportY):
---    dang Find ma co Sea Event (TAT CA, TRU Leviathan) -> bay len SeaTeleportY.
---    Het Sea Event (qua 5s khong thay) -> nhuong lai cho Fly Boat.
---  * Leviathan KHONG tinh la su kien de nang Y.
--- Co che chong giat: chi con 1 noi lai Y moi frame (Tween Engine tach truc),
--- holder ben duoi CHI giu Y khi khong co boat mover (vd Frozen cho ban len
--- thuyen). Khong con canh 3 co che cung keo Y danh nhau nhu truoc.
--- ============================================================================
+
 __DIO_FindAnyOn = function()
     if _G.FindMirage or _G.Prehis_Find or _G.AutofindKitIs or _G.FrozenDimension then return true end
     return false
@@ -6024,8 +5993,106 @@ __DIO_MapFarmLive = function(list)
     return false
 end
 do
-    local function __DIOKey(tabName, name)
-        return "UI/" .. tostring(tabName) .. "/" .. tostring(name or "")
+    -- [[FIX-DIO-1]] Moi loai element co khoa save rieng.
+    -- Truoc day Toggle "Ship Speed" va Slider "Ship Speed" cung ghi vao
+    -- "UI/SeaEvent/Ship Speed": toggle luu `true` (boolean), lan sau chay lai
+    -- Slider lay Default = true -> redzlib bao loi:
+    --   "Tab.AddSlider.Default". 'number', or 'nil' expected, got boolean
+    local __DIO_KeyKind = {}
+    local function __DIOKey(tabName, name, kind)
+        local base = "UI/" .. tostring(tabName) .. "/" .. tostring(name or "")
+        kind = tostring(kind or "Toggle")
+        if kind == "Toggle" then
+            -- toggle luon giu khoa goc de __DIO_ToggleFlagMap con hoat dong
+            __DIO_KeyKind[base] = "Toggle"
+            return base, base
+        end
+        local prev = __DIO_KeyKind[base]
+        if prev ~= nil and prev ~= kind then
+            local alt = base .. " #" .. kind
+            __DIO_KeyKind[alt] = kind
+            return alt, base
+        end
+        __DIO_KeyKind[base] = kind
+        return base, base
+    end
+    -- [[FIX-DIO-2]] Loc kieu du lieu khi restore save.
+    -- Khong bao gio dua boolean/string vao Default cua Slider (va nguoc lai),
+    -- nho vay save cu / save bi ghi de khong con lam chet luc khoi dong.
+    local function __DIO_Num(v)
+        if type(v) == "number" then
+            if v ~= v or v == math.huge or v == -math.huge then return nil end
+            return v
+        end
+        if type(v) == "string" then
+            local n = tonumber(v)
+            if n ~= nil and n == n then return n end
+        end
+        return nil
+    end
+    local function __DIO_SavedNum(key, legacyKey)
+        local data = _G.SaveData or {}
+        local v = __DIO_Num(rawget(data, key))
+        if v == nil and legacyKey and legacyKey ~= key then
+            v = __DIO_Num(rawget(data, legacyKey))
+            if v ~= nil then pcall(SetSetting, key, v) end
+        end
+        return v
+    end
+    local function __DIO_SavedBool(key, legacyKey)
+        local data = _G.SaveData or {}
+        local v = rawget(data, key)
+        if type(v) ~= "boolean" and legacyKey and legacyKey ~= key then
+            local v2 = rawget(data, legacyKey)
+            if type(v2) == "boolean" then v = v2 end
+        end
+        if type(v) == "boolean" then return v end
+        return nil
+    end
+    local function __DIO_SavedSel(key, legacyKey, multi)
+        local data = _G.SaveData or {}
+        local v = rawget(data, key)
+        if v == nil and legacyKey and legacyKey ~= key then v = rawget(data, legacyKey) end
+        if multi == true then
+            if type(v) == "table" then
+                local arr, n = {}, 0
+                for k, on in pairs(v) do
+                    if on == true and type(k) == "string" then
+                        n = n + 1 arr[n] = k
+                    elseif type(k) == "number" and type(on) == "string" then
+                        n = n + 1 arr[n] = on
+                    end
+                end
+                return arr
+            elseif type(v) == "string" and v ~= "" then
+                return { v }
+            end
+            return nil
+        end
+        if type(v) == "string" then return v end
+        return nil
+    end
+    -- [[FIX-DIO-3]] Tao element an toan: neu UI lib nem loi thi bo Default roi thu lai,
+    -- de 1 dong config sai khong lam chet ca hub.
+    local function __DIO_SafeAdd(fn, self, Setting, kind)
+        local ok, res = pcall(fn, self, Setting)
+        if ok then return res end
+        pcall(function()
+            warn("[DIO] " .. tostring(kind) .. " '" .. tostring(Setting and (Setting.Name or Setting.Title))
+                .. "' loi: " .. tostring(res))
+        end)
+        if type(Setting) == "table" then
+            local fix = {}
+            for k, v in pairs(Setting) do fix[k] = v end
+            fix.Default = nil
+            local ok2, res2 = pcall(fn, self, fix)
+            if ok2 then return res2 end
+            pcall(function()
+                warn("[DIO] " .. tostring(kind) .. " '" .. tostring(Setting and (Setting.Name or Setting.Title))
+                    .. "' van loi khi bo Default: " .. tostring(res2))
+            end)
+        end
+        return nil
     end
     local function __DIO_DeepEq(a, b)
         if a == b then return true end
@@ -6045,10 +6112,13 @@ do
         local _AddToggle = tab.AddToggle
         if type(_AddToggle) == "function" then
             function tab:AddToggle(Setting)
-                local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title))
-                local saved = GetSetting(key, nil)
+                local key, legacyKey = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title), "Toggle")
+                local saved = __DIO_SavedBool(key, legacyKey)
                 if _G.DIO_AutoRestore == true and Setting and saved ~= nil then
                     Setting.Default = saved
+                end
+                if Setting and type(Setting.Default) ~= "boolean" then
+                    Setting.Default = false
                 end
                 local origCb = Setting and Setting.Callback
                 local __userTouched = false
@@ -6216,7 +6286,7 @@ do
                         end
                     end
                 end
-                local ctrl = _AddToggle(self, Setting)
+                local ctrl = __DIO_SafeAdd(_AddToggle, self, Setting, "AddToggle")
                 if _G.DIO_AutoRestore == true and saved ~= nil and origCb then
                     task.delay(3, function()
                         if not __userTouched then
@@ -6230,19 +6300,10 @@ do
         local _AddDropdown = tab.AddDropdown
         if type(_AddDropdown) == "function" then
             function tab:AddDropdown(Setting)
-                local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title))
-                local saved = GetSetting(key, nil)
-                local __savedCb = saved
+                local key, legacyKey = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title), "Dropdown")
+                local saved = __DIO_SavedSel(key, legacyKey, Setting and Setting.MultiSelect == true)
                 if Setting and saved ~= nil then
-                    if Setting.MultiSelect and type(saved) == "table" then
-                        local __arrD = {}
-                        for __kD, __vD in pairs(saved) do
-                            if __vD == true and type(__kD) == "string" then table.insert(__arrD, __kD) end
-                        end
-                        Setting.Default = __arrD
-                    else
-                        Setting.Default = saved
-                    end
+                    Setting.Default = saved
                 end
                 local origCb = Setting and Setting.Callback
                 local __userTouched = false
@@ -6284,7 +6345,7 @@ do
                         end)
                     end
                 end
-                local ctrl = _AddDropdown(self, Setting)
+                local ctrl = __DIO_SafeAdd(_AddDropdown, self, Setting, "AddDropdown")
                 if _G.DIO_AutoRestore == true and saved ~= nil and origCb then
                     task.delay(3, function()
                         if not __userTouched then
@@ -6298,10 +6359,22 @@ do
         local _AddSlider = tab.AddSlider
         if type(_AddSlider) == "function" then
             function tab:AddSlider(Setting)
-                local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title))
-                local saved = GetSetting(key, nil)
-                if Setting and saved ~= nil then
-                    Setting.Default = saved
+                local key, legacyKey = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title), "Slider")
+                local saved = __DIO_SavedNum(key, legacyKey)
+                if Setting then
+                    local value = saved
+                    if value == nil then value = __DIO_Num(Setting.Default) end
+                    local lo, hi = __DIO_Num(Setting.Min), __DIO_Num(Setting.Max)
+                    if lo == nil then lo = 0 end
+                    if hi == nil then hi = 100 end
+                    if lo > hi then lo, hi = hi, lo end
+                    if value ~= nil then
+                        if value < lo then value = lo elseif value > hi then value = hi end
+                    end
+                    -- Default cua Slider bat buoc la number hoac nil (khong duoc boolean)
+                    Setting.Default = value
+                    Setting.Min, Setting.Max = lo, hi
+                    if __DIO_Num(Setting.Increment) == nil then Setting.Increment = 1 end
                 end
                 local origCb = Setting and Setting.Callback
                 local __userTouched = false
@@ -6314,7 +6387,7 @@ do
                         pcall(origCb, Value)
                     end
                 end
-                local ctrl = _AddSlider(self, Setting)
+                local ctrl = __DIO_SafeAdd(_AddSlider, self, Setting, "AddSlider")
                 if _G.DIO_AutoRestore == true and saved ~= nil and origCb then
                     task.delay(3, function()
                         if not __userTouched then
@@ -6328,7 +6401,7 @@ do
         local _AddButton = tab.AddButton
         if type(_AddButton) == "function" then
             function tab:AddButton(Setting)
-                local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title))
+                local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title), "Button")
                 local origCb = Setting and Setting.Callback
                 if Setting and origCb then
                     Setting.Callback = function(...)
@@ -6361,7 +6434,7 @@ do
                         return __okB
                     end
                 end
-                return _AddButton(self, Setting)
+                return __DIO_SafeAdd(_AddButton, self, Setting, "AddButton")
             end
         end
     end
@@ -18345,10 +18418,7 @@ __DIO_FlyTo = function(targetCF, arriveDist, cancelFn)
     local __h = __c and __c:FindFirstChild("HumanoidRootPart")
     if not __h then return false end
     arriveDist = arriveDist or 15
-    -- FIX "treo": FlyTo khong co cancelFn (vd Auto Rengoku Sword) truoc day bay toi 300s
-    -- du da tat toggle (FlyBusy = true -> highlight/shouldTween ket). Gio tu huy khi:
-    --   * tat toggle (off-edge) sau khi bat dau bay, hoac
-    --   * tat ca flag dang bat luc bat dau bay deu da tat.
+
     do
         local __snap = {}
         local __hasSnap = false
@@ -19590,8 +19660,7 @@ __DIO_M1AOE = function(range, includeChars)
     return nil
 end
 __DIO_M1AppendTarget = function(hits, target, range)
-    -- Muc tieu chi dinh nam ngoai Enemies (SeaBeast/Leviathan o SeaBeasts) thi
-    -- getBladeHits khong thay -> chen tay de giu hanh vi danh boss bien nhu cu.
+ 
     if not target or not target.Parent then return hits end
     local char = plr.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -20074,7 +20143,7 @@ local function __DIO_KeyMiniUI()
     mk("UIStroke", { Color = Color3.fromRGB(60, 60, 70), Transparency = 0.3 }, fr)
 
     mk("TextLabel", {
-        Text = "DIO HUB - NHAP KEY",
+        Text = "DIO HUB - GET KEY",
         Size = UDim2.new(1, -20, 0, 20),
         Position = UDim2.fromOffset(10, 8),
         BackgroundTransparency = 1,
