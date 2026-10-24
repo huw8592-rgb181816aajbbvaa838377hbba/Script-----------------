@@ -34,8 +34,7 @@ local _DIO_KeyConfig = {
     Loaded     = false,
 }
 local SAVE_FOLDER = "DIOHub_V3"
-local KEY_FILE = SAVE_FOLDER .. "/KeyCache.json"
-
+local KEY_FILE = SAVE_FOLDER .. "/DIO-SCRIPT-KeyCache.json"
 
 local _DIO_KeyDiag   = ""
 local _DIO_ApiOnline = false
@@ -129,7 +128,6 @@ local function _DIO_TryPastefy(url, tag)
     return dec
 end
 
-
 local function _DIO_KeyListFrom(data)
     local out = {}
     local function push(v)
@@ -209,7 +207,6 @@ local function _DIO_KeyLabel()
     return "(chua co - hay bam Check Key)"
 end
 
-
 local function _DIO_ReadKeyCache()
     if not (isfile and readfile) then return nil end
     local ok, data = pcall(function()
@@ -272,7 +269,6 @@ local function _SEC_VerifyKey(inputKey)
                 return true
             end
         end
-
 
         warn("[DIO KEY] Lan doc dau khong thay key nay -> doc lai Api (chong cache)...")
         local data2 = _DIO_ResolvePendingFromPastefy()
@@ -512,7 +508,6 @@ local function isKeyValid()
         return true
     end
 
-
     if _DIO_ApiOnline then
         _DIO_InvalidateStaleCache()
         warn("[DIO KEY] Api doc duoc nhung key cua may nay khong con hop le -> hien cua so nhap key.")
@@ -623,13 +618,11 @@ do
   replicated = __SVC_RS
   local __data = plr:WaitForChild("Data", 30)
   local __lvl = __data and __data:FindFirstChild("Level")
-  Lv = __lvl and __lvl.Value or 0
   TeleportService = __SVC_TP
   TW = __SVC_TWN
   Lighting = __SVC_LIGHT
   Enemies = workspace:WaitForChild("Enemies", 30)
   vim1 = __SVC_VIM
-  TeamSelf = plr.Team
   Stats = __SVC_STAT
   local __en = plr.Character:FindFirstChild("Energy")
   Energy = __en and __en.Value or 0
@@ -662,7 +655,6 @@ __DIO_TweenActivateImmediate = function()
     __DIO_LastActT = __nowA
     __DIO_TweenBlockT = 0
     __DIO_TweenBlockDur = 0.5
-    __DIO_FalseSince = nil
     shouldTween = true
     if type(__DIO_Move) == "function" then pcall(__DIO_Move) end
     pcall(function() __DIO_Wake(true) end)
@@ -765,18 +757,14 @@ __DIO_TWEEN_LEASE  = 30
 __DIO_MOVE_GRACE   = 12
 __DIO_SOFT_DROP    = 1.5
 __DIO_MoveT        = 0
-__DIO_Parked       = false
 __DIO_DropPendT    = 0
-__DIO_DropPendReason = nil
 __DIO_FeatOnN      = 0
 __DIO_FeatMark     = {}
 __DIO_UIOn         = {}
 __DIO_UIOnN        = 0
 __DIO_Move = function()
     __DIO_MoveT    = tick()
-    __DIO_Parked   = false
     __DIO_DropPendT = 0
-    __DIO_DropPendReason = nil
 end
 __DIO_MoveFresh = function()
     return (tick() - (__DIO_MoveT or 0)) <= (__DIO_MOVE_GRACE or 12)
@@ -843,8 +831,6 @@ __DIO_FlagSet = function(name, val)
 end
 __DIO_QuestGone = function()
     local __okQ, __gone = pcall(function()
-
-
 
         if type(__DIO_3nn_GetTrackedQuestText) == "function" then
             return (__DIO_3nn_GetTrackedQuestText() or "") == ""
@@ -1024,7 +1010,6 @@ __DIO_AnyFeatureOn = function()
     return false
 end
 
-
 __DIO_TweenBlockT     = 0
 __DIO_TweenBlockDur   = 0.5
 __DIO_FlagPrev        = __DIO_FlagPrev or {}
@@ -1156,16 +1141,13 @@ __DIO_TweenSet = function(cf)
     local ok = pcall(function() return cf.Position end)
     if not ok then return end
     __DIO_TweenTarget = cf
-    __DIO_LastTweenTarget = cf
     __DIO_LastTpT = tick()
     shouldTween = true
     if type(__DIO_Move) == "function" then __DIO_Move() end
 end
 __DIO_TweenDropHard = function(reason)
-    __DIO_TweenTarget, __DIO_LastTweenTarget = nil, nil
-    __DIO_LastDist, __DIO_LastHRPPos = nil, nil
-    __DIO_Parked = false
-    __DIO_DropPendT, __DIO_DropPendReason = 0, nil
+    __DIO_TweenTarget = nil
+    __DIO_DropPendT = 0
     pcall(function() if __DIO_LastTween and __DIO_LastTween.Cancel then __DIO_LastTween:Cancel() end end)
     __DIO_LastTween = nil
     pcall(function()
@@ -1177,7 +1159,7 @@ end
 __DIO_TweenDrop = function(reason)
     if type(__DIO_AnyFeatureOn) == "function" and __DIO_AnyFeatureOn() then
         __DIO_DropPendT = tick()
-        __DIO_DropPendReason = tostring(reason or "soft")
+        tostring(reason or "soft")
         return
     end
     __DIO_TweenDropHard(reason)
@@ -1194,11 +1176,9 @@ __DIO_TweenKill = function(keepHighlight, force)
     if force ~= true and type(__DIO_AnyFeatureOn) == "function" and __DIO_AnyFeatureOn() then
         return __DIO_TweenSync()
     end
-    __DIO_TweenTarget, __DIO_LastTweenTarget = nil, nil
+    __DIO_TweenTarget = nil
     __DIO_LastTpT, __DIO_MoveT = 0, 0
-    __DIO_Parked, __DIO_FalseSince = false, nil
     __DIO_CurTarget = nil
-    __DIO_LastDist, __DIO_LastHRPPos = nil, nil
     __DIO_DropPendT = 0
     shouldTween = false
     pcall(function() if __DIO_LastTween and __DIO_LastTween.Cancel then __DIO_LastTween:Cancel() end end)
@@ -1320,7 +1300,6 @@ __DIO_FeatToggle = function(flag, on)
         __DIO_OffEdgeT = 0
         __DIO_PrevAnyOn = true
         pcall(__DIO_TweenClearBlock)
-        __DIO_FalseSince = nil
         shouldTween = true
         if type(__DIO_Move) == "function" then pcall(__DIO_Move) end
         pcall(function() if type(__DIO_HlOn) == "function" then __DIO_HlOn() end end)
@@ -1801,18 +1780,13 @@ __DIO_FarmPos = function(model, h, zOff, yawDeg)
     end
     if mode == "Dodge" then
 
-
-
-
         if mdl then
             __DIO_CurTarget = mdl
             __DIO_TargetT = tick()
         end
     end
 
-
-
-    local h2 = math.min(tonumber(h) or 20, math.clamp(tonumber(_G.FarmDistance) or (tonumber(h) or 20), 3, 100), tonumber(_G.MeleeStandMax) or 25)
+    local h2 = math.min(tonumber(h) or 20, math.clamp(tonumber(_G.FarmDistance) or (tonumber(h) or 20), 3, 100), 25)
     return modelCF * CFrame.new(0, h2, zOff or 0) * CFrame.Angles(0, math.rad(yawDeg or 0), 0)
 end
 task.spawn(function()
@@ -1989,22 +1963,16 @@ local Attack = {}
 				__DIO_DodgeBypass = nil
 			elseif Equipped and Equipped.Name == "Dragonstorm" and type(__RAID_SpamGun) == "function" then
 
-
-
 				_tp(model.HumanoidRootPart.CFrame * CFrame.new(0, 60, 0))
 				pcall(__RAID_SpamGun, model.HumanoidRootPart)
 			else
-
-
 
 				__DIO_DodgeBypass = true
 				pcall(function() _tp(model.HumanoidRootPart.CFrame * CFrame.new(0, 60, 0)) end)
 				__DIO_DodgeBypass = nil
 			end
 
-
 			pcall(__DIO_3nn_M1, model, 80)
-
 
 			if ToolTip == "Gun" and type(__DIO_SeaSkillAtk) == "function" then
 				pcall(__DIO_SeaSkillAtk)
@@ -2136,11 +2104,6 @@ IsRaidMob = function(mob)
     if ok then return result end
     return false
 end
-
-
-
-
-
 
 __DIO_3nn_TableMobSpawn = __DIO_3nn_TableMobSpawn or {}
 task.spawn(function()
@@ -2476,7 +2439,7 @@ LowCpu = function()
     elseif v:IsA("MeshPart") then
       v.Material = "Plastic"
       v.Reflectance = 0
-      v.TextureID = 10385902758728957
+      pcall(function() v.TextureID = "rbxassetid://10385902758728957" end)
     end
   end
   for i, e in pairs(l:GetChildren()) do
@@ -2629,22 +2592,6 @@ local function __DIO_SeaScan()
     return r
 end
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 __DIO_Dodging = __DIO_Dodging or false
 _G.AutoDodgeTerrorshark = (_G.AutoDodgeTerrorshark == true)
 _G.AutoDodgeSeabeast = (_G.AutoDodgeSeabeast == true)
@@ -2652,11 +2599,7 @@ __DIO_BananaTerrorDodge = false
 __DIO_BananaSeaDodge = 0
 __DIO_BananaSeaBusy = false
 
-
-
-
 __DIO_TerrorDodgeOn = function()
-
 
     return (_G.AutoDodgeTerrorshark == true) and (__DIO_BananaTerrorDodge == true)
         and ((_G.TerrorShark == true) or (_G.SailBoats == true))
@@ -2785,7 +2728,6 @@ __DIO_SafeLoop(function()
                 __DIO_BananaSeaBusy = true
                 task.spawn(function()
 
-
                     task.wait(0.05)
                     if _G.AutoDodgeSeabeast ~= true then __DIO_BananaSeaBusy = false return end
                     local t0 = tick()
@@ -2808,7 +2750,6 @@ __DIO_SnapTo = function(cf)
     if hum.Sit then return end
     local ok = pcall(function()
         __DIO_TweenTarget = nil
-        __DIO_LastDist, __DIO_LastHRPPos = nil, nil
         hrp.AssemblyLinearVelocity  = Vector3.zero
         hrp.AssemblyAngularVelocity = Vector3.zero
         hrp.CFrame = cf
@@ -2970,7 +2911,6 @@ block.CanTouch = false
 block.Transparency = 1
 __DIO_Block = block
 
-
 task.spawn(function()
     local a = game.Players.LocalPlayer
     repeat task.wait() until a.Character and a.Character.PrimaryPart
@@ -3075,8 +3015,6 @@ function __DIO_MobNear(pos)
 end
 __DIO_NEAR_SPEED  = 600
 __DIO_NEAR_RADIUS = 150
-
-
 
 __DIO_GetTweenSpeed = function()
     local v = tonumber(_G.TweenSpeed)
@@ -3256,7 +3194,7 @@ do
 
     local function log(...)
         if Engine.Debug then
-            print("[DIO-You gay]", ...)
+            print("[DIO-3nnTween]", ...)
         end
     end
 
@@ -3350,9 +3288,6 @@ do
             if __DIO_LastTween == m.handle then __DIO_LastTween = nil end
             if state == Enum.PlaybackState.Cancelled then
                 __DIO_TweenTarget = nil
-                __DIO_LastDist = nil
-                __DIO_LastHRPPos = nil
-                __DIO_Parked = false
             end
         end
 
@@ -3568,11 +3503,15 @@ do
         end
 
         local delta = goal.Position - m.path
+        local __yLocked = (m.boat == true) and (__DIO_BoatYLockOn == true)
+        if __yLocked then delta = Vector3.new(delta.X, 0, delta.Z) end
         local dist = delta.Magnitude
         if dist <= m.eps then
             if m.boat and m.boatModel and m.boatModel.Parent then
                 -- FIX jerk: thuyen den dich NGUYEN CUM (rigid), khong giat le seat gay vo weld rung lac
-                pcall(function() m.boatModel:PivotTo(m.boatModel:GetPivot() + (goal.Position - pos)) end)
+                local __arrD = goal.Position - pos
+                if __yLocked then __arrD = Vector3.new(__arrD.X, 0, __arrD.Z) end
+                pcall(function() m.boatModel:PivotTo(m.boatModel:GetPivot() + __arrD) end)
             else
                 part.CFrame = CFrame.new(goal.Position) * rot
             end
@@ -3581,9 +3520,6 @@ do
                 part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
             end
             if m.player then
-                __DIO_LastDist = 0
-                __DIO_LastHRPPos = goal.Position
-                __DIO_Parked = true
                 pcall(function() if __DIO_Block then __DIO_Block.CFrame = part.CFrame end end)
             end
             if tick() - m.lastFeed > 0.30 then
@@ -3605,7 +3541,7 @@ do
             local __dxzB = Vector3.new(delta.X, 0, delta.Z)
             local __dxzMagB = __dxzB.Magnitude
             local __moveXZB = (__dxzMagB > 0.001) and ((__dxzB / __dxzMagB) * math.min(__spdB, __dxzMagB)) or Vector3.new(0, 0, 0)
-            local __moveYB = math.clamp(delta.Y, -__spdB, __spdB)
+            local __moveYB = __yLocked and 0 or math.clamp(delta.Y, -__spdB, __spdB)
             newPos = m.path + __moveXZB + Vector3.new(0, __moveYB, 0)
         else
             local step = math.min(m.speed * dt, Engine.MaxStep, dist)
@@ -3628,8 +3564,6 @@ do
             part.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
         end
         if m.player then
-            __DIO_LastDist = (goal.Position - newPos).Magnitude
-            __DIO_LastHRPPos = newPos
             pcall(function() if __DIO_Block then __DIO_Block.CFrame = part.CFrame end end)
         end
         return true
@@ -3663,8 +3597,6 @@ do
         local speed = (type(__DIO_PickTweenSpeed) == "function" and __DIO_PickTweenSpeed(dist, hrp.Position, hum))
             or (type(__DIO_GetTweenSpeed) == "function" and __DIO_GetTweenSpeed())
             or math.max(tonumber(_G.TweenSpeed) or 190, 1)
-
-
 
         if hum.Sit and type(__DIO_SeaCombat) == "function" and __DIO_SeaCombat() then
             -- dang combat sea event: roi thuyen truoc, vong _tp sau se tween NGUOI CHOI den mob
@@ -3703,19 +3635,6 @@ do
     end
 end
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 do
     local Players = __SVC_PLR or game:GetService("Players")
     local LP = plr or Players.LocalPlayer
@@ -3726,7 +3645,6 @@ do
 
     getgenv().CharSpeed = getgenv().CharSpeed or { cap = 1000, nextRaise = 0 }
     getgenv().TweenSnapRange = (Engine and Engine.SnapRange) or getgenv().TweenSnapRange or 7
-
 
     local function hrp()
         local c = LP and LP.Character
@@ -3758,7 +3676,6 @@ do
             end
         end
     end)
-
 
     local __lodDone = false
     local function loadFakePoint(model)
@@ -3928,10 +3845,6 @@ do
             h.CFrame = h.CFrame * CFrame.new(0, 20, 0)
         end
 
-
-        if _G.ReadyToDodge == true then
-            return false, goal + Vector3.new(0, 200, 0)
-        end
         if Settings and Settings["Teleport Y"] then
             local hpRate = hu.Health / math.max(hu.MaxHealth, 1)
             local lim = (tonumber(Settings["% Health Player"]) or 40) / 100
@@ -3941,7 +3854,6 @@ do
         end
 
         local dist = (goal.Position - h.Position).Magnitude
-
 
         local usePortal = (_G.UsePortalTeleport == true) or (Settings and Settings["Use Portal Teleport"] == true)
         if usePortal and dist >= 3000 and portalReady() then
@@ -3956,7 +3868,6 @@ do
                 end
             end
         end
-
 
         if dist >= 3000 and tick() - (__DIO_Banana_LastEntrance or 0) > 0.75 then
             local mapName = workspace:GetAttribute("MAP")
@@ -4004,7 +3915,6 @@ do
                 return true
             end
         end
-
 
         pcall(function()
             local hereArea = inArea(h.Position)
@@ -4059,7 +3969,6 @@ do
         getgenv().noclip = state == true
     end
 
-
     getgenv().StopAllTween = function()
         if TweenManager and TweenManager.CancelTweenOnly then pcall(TweenManager.CancelTweenOnly) end
         if Engine and Engine.CancelAll then pcall(function() Engine.CancelAll() end) end
@@ -4068,26 +3977,20 @@ do
             if h and h.Cancel then pcall(function() h:Cancel() end) end
             getgenv()[key] = nil
         end
-        __DIO_TweenTarget, __DIO_LastTweenTarget, __DIO_LastTween = nil, nil, nil
+        __DIO_TweenTarget, __DIO_LastTween = nil, nil
         shouldTween = false
         getgenv().noclip = false
         pcall(function() if type(__DIO_HlOff) == "function" then __DIO_HlOff() end end)
     end
 
-
 end
 
 __DIO_TweenTarget = nil
 __DIO_LastTpT = 0
-__DIO_LastDist = nil
-__DIO_LastHRPPos = nil
-__DIO_FalseSince = nil
 __DIO_NewFakeTween = function()
     local t = { PlaybackState = Enum.PlaybackState.Playing }
     t.Cancel = function()
         __DIO_TweenTarget = nil
-        __DIO_LastDist = nil
-        __DIO_LastHRPPos = nil
         t.PlaybackState = Enum.PlaybackState.Cancelled
     end
     t.Play = function()
@@ -4153,9 +4056,6 @@ _tp = function(target)
         gg = target and target.CFrame
     end
     if not gg then return end
-
-
-
 
     if (not __DIO_DodgeBypass) and __DIO_TerrorDodgeOn and __DIO_TerrorDodgeOn() then
         gg = gg + Vector3.new(0, 200, 0)
@@ -4235,7 +4135,6 @@ _tp = function(target)
                 -- FIX: nhanh requestEntrance/portal truoc day return ma KHONG bat shouldTween
                 -- -> toggle chi co highlight, khong co shouldTween = true.
                 __DIO_TweenTarget = gg
-                __DIO_LastTweenTarget = gg
                 __DIO_LastTpT = tick()
                 shouldTween = true
                 if type(__DIO_Move) == "function" then __DIO_Move() end
@@ -4246,10 +4145,8 @@ _tp = function(target)
         end
     end
     __DIO_TweenTarget = gg
-    __DIO_LastTweenTarget = gg
     __DIO_LastTpT = tick()
     shouldTween = true
-    __DIO_FalseSince = nil
     if type(__DIO_Move) == "function" then __DIO_Move() end
     if type(__DIO_TweenClearBlock) == "function" and __DIO_AnyFeatureOn() then __DIO_TweenClearBlock() end
     local __tw = nil
@@ -4266,7 +4163,6 @@ _tp = function(target)
     __DIO_LastTween = __ft
     return __ft
 end
-
 
 old_tp = function(p)
     pcall(function()
@@ -4290,7 +4186,6 @@ StopTween = function(state)
         shouldTween = true
         __DIO_TweenBlockT = 0
         __DIO_TweenBlockDur = 0.5
-        __DIO_FalseSince = nil
         if type(__DIO_Move) == "function" then pcall(__DIO_Move) end
         if type(__DIO_TweenSync) == "function" then pcall(__DIO_TweenSync) end
         return
@@ -4301,8 +4196,6 @@ StopTween = function(state)
     end
     shouldTween = false
     __DIO_TweenTarget = nil
-    __DIO_LastDist = nil
-    __DIO_LastHRPPos = nil
     pcall(function()
         if __DIO_LastTween then
             __DIO_LastTween:Cancel()
@@ -4325,8 +4218,6 @@ TeleportToTarget = function(targetCFrame)
     _tp(targetCFrame)
 end
 notween = function(p)
-
-
 
     if (not __DIO_DodgeBypass) and typeof(p) == "CFrame" and __DIO_TerrorDodgeOn and __DIO_TerrorDodgeOn() then
         p = p + Vector3.new(0, 200, 0)
@@ -4503,14 +4394,21 @@ __DIO_BoatAssist = function()
     local __sp = __seat.CFrame.Position
     if (__hrp.Position - __sp).Magnitude <= 8 and __hrp.Position.Y >= __sp.Y - 1 then
         __DIO_TweenTarget = nil
-        __DIO_LastDist = nil __DIO_LastHRPPos = nil
         __hrp.AssemblyLinearVelocity = Vector3.new(0, -15, 0)
         return "busy"
     end
     _tp(__seat.CFrame * CFrame.new(0, 1, 0))
     return "goSeat"
 end
-
+-- He thong Y thuyen cho 4 Find (Frozen Dimension / Kitsune / Prehistoric / Mirage):
+--  * Slider "Fly Boat" (_G.FlyBoatY): Y bay co dinh, CHI ap dung cho 4 Find.
+--    Auto Sea Event KHONG dung Fly Boat (luon giu Y 31).
+--  * Toggle "Teleport Y boat using a slider" (_G.TeleportYSlider) + slider
+--    "Teleport Y boat If have Sea Event (ALL)" (_G.SeaTeleportY): khi dang Find ma
+--    co Sea Event (tru Leviathan) thi bay len SeaTeleportY; het Sea Event (sau 5s)
+--    nhuong lai cho Fly Boat.
+--  * 4 Find khong goi _tp nua: dung __DIO_CruiseGo(src, dich); bo lai __tickDrv (Stepped + Heartbeat)
+--    giu Y tuyet doi va dua thuyen XZ ve dich nen khong con 2 noi keo Y danh nhau.
 __DIO_FindAnyOn = function()
     if _G.FindMirage or _G.Prehis_Find or _G.AutofindKitIs or _G.FrozenDimension then return true end
     return false
@@ -4549,18 +4447,33 @@ __DIO_BoatWantY = function()
     end
     return math.clamp(math.floor(tonumber(_G.FlyBoatY) or 150), 30, 500)
 end
--- Ten cu de tuong thich (cac cho con goi __DIO_FindCruiseY van chay dung).
-__DIO_FindCruiseY = __DIO_BoatWantY
-__DIO_CruiseWantY = nil
-__DIO_CruiseWantT = 0
-__DIO_CruiseFeed = function()
-    __DIO_CruiseWantY = __DIO_BoatWantY()
-    __DIO_CruiseWantT = tick()
-    return __DIO_CruiseWantY
+-- Moi Find (mirage / prehis / kitsune / frozen) tu bao "toi dang quet bien" qua
+-- __DIO_CruiseFeed(src). Cruise con hieu luc 3s sau lan bao cuoi, nen ghe nhay Sit
+-- tam thoi hoac vong lap thoat/vao lai KHONG lam mat khoa Y (nguyen nhan thuyen
+-- roi ve Y 31 roi bay len lai). Chi khi thay dao / tat toggle moi goi CruiseStop(src).
+__DIO_CruiseFeeds = {}
+__DIO_CruiseDest = nil
+__DIO_CruiseFeed = function(src)
+    __DIO_CruiseFeeds[src or "find"] = tick()
+    __DIO_CruiseDest = nil
+    return __DIO_BoatWantY()
 end
-__DIO_CruiseStop = function()
-    __DIO_CruiseWantY = nil
-    __DIO_CruiseWantT = 0
+-- Thay cho _tp(dich) o 4 Find: bao "dang quet" + dat dich cho bo lai thuyen (khong qua Tween Engine).
+__DIO_CruiseGo = function(src, destCF)
+    local __nowG = tick()
+    __DIO_CruiseFeeds[src or "find"] = __nowG
+    if destCF then __DIO_CruiseDest = { pos = destCF.Position, t = __nowG } end
+end
+__DIO_CruiseStop = function(src)
+    __DIO_CruiseFeeds[src or "find"] = nil
+end
+__DIO_CruiseActive = function()
+    if not __DIO_FindAnyOn() then return false end
+    local __nowCA = tick()
+    for _, __tCA in pairs(__DIO_CruiseFeeds) do
+        if (__nowCA - __tCA) <= 3 then return true end
+    end
+    return false
 end
 -- [DIO-GRAFT Banana] Find ping-pong "Will Back When over 10km":
 -- thuyen chay ra bien xa dan; khi "danger distance" (module DangerDistance cua
@@ -4616,45 +4529,114 @@ __DIO_FindCruiseDest = function(wantY)
     return CFrame.new(-10000000, __yC, 37016.25)
 end
 -- [FINDPINGPONG END]
--- Holder du phong: CHI giu Y khi dang cruise ma KHONG co boat mover nao dang lai
--- (vd Frozen huy tween de cho ban len thuyen). Co mover thi Engine lai - holder
--- dung im, nen khong bao gio co 2 noi cung keo Y trong cung 1 frame.
-pcall(function()
-    game:GetService("RunService").Stepped:Connect(function(_, __dtH)
-        pcall(function()
-            if not __DIO_FindAnyOn() then return end
-            if (tick() - (tonumber(__DIO_CruiseWantT) or 0)) > 2.5 then return end
-            local __chH = plr.Character
-            local __humH = __chH and __chH:FindFirstChildOfClass("Humanoid")
-            if not __humH or not __humH.Sit then return end
-            local __seatH = __humH.SeatPart
-            if not __seatH then return end
-            local __engH = __DIO_TweenEngine or getgenv().__DIO_TweenEngine3nn
-            if __engH and __engH.Movers then
-                local __mH = __engH.Movers[__seatH]
-                if __mH and not __mH.dead and __mH.boat then return end
+-- Bo lai thuyen cho 4 Find (port co che ban cu: vi tri goc tuyet doi + Y dich tuc thi + ep thuyen
+-- ve vi tri goc moi frame + van toc 0). Ghe nhay Sit tam thoi thi van giu thuyen cu trong cua so
+-- cruise 3s. __DIO_BoatYLockOn = true khi bo lai dang giu thuyen (Tween Engine khong keo Y nua).
+__DIO_BoatYLockOn = false
+__DIO_BoatYResolve = function()
+    local __chY = plr.Character
+    local __humY = __chY and __chY:FindFirstChildOfClass("Humanoid")
+    local __seatY = (__humY and __humY.Sit) and __humY.SeatPart or nil
+    local __boatY = __seatY and __seatY:FindFirstAncestorOfClass("Model") or nil
+    if __boatY and __DIO_IsMyBoat(__boatY) then
+        __DIO_BoatCache = __boatY
+        return __boatY, __seatY
+    end
+    local __bcY = __DIO_BoatCache
+    if __bcY and __bcY.Parent and __DIO_IsMyBoat(__bcY) then
+        local __sY = __DIO_BoatSeatOf(__bcY)
+        local __hrpY = __chY and __chY:FindFirstChild("HumanoidRootPart")
+        if __sY and __hrpY and (__sY.Position - __hrpY.Position).Magnitude <= 80 then
+            return __bcY, __sY
+        end
+    end
+    return nil, nil
+end
+do
+    -- Port co che ban cu: part "block" neo cung giu vi tri GOC TUYET DOI, _tp snap Y cua block
+    -- ve Y dich roi tween XZ, vong lap moi frame ep thuyen/nguoi ve block (HRP.CFrame = block.CFrame)
+    -- va BodyClip giu van toc 0. O day: __drv la vi tri goc cua ghe; Y = Y dich TUC THI (khong buoc
+    -- theo vi tri vat ly hien tai), XZ tien ve dich theo toc do thuyen, moi frame dich ca thuyen
+    -- (PivotTo ca model, khong tach seat) ve dung __drv va triet tieu van toc.
+    local __drv = nil
+    local __targetY, __targetT = nil, 0
+    local __speed, __speedT = 165, 0
+    local __clipT = 0
+    local function __drvOff()
+        __DIO_BoatYLockOn = false
+        __drv = nil
+    end
+    local function __tickDrv(__dtD, __advance)
+        if not __DIO_CruiseActive() or (type(__DIO_SeaCombat) == "function" and __DIO_SeaCombat()) then
+            __drvOff()
+            return
+        end
+        local __boatD, __seatD = __DIO_BoatYResolve()
+        if not __boatD or not __seatD then
+            __drvOff()
+            return
+        end
+        local __nowD = tick()
+        if __targetY == nil or (__nowD - __targetT) >= 0.2 then
+            local __okY, __valY = pcall(__DIO_BoatWantY)
+            if __okY and tonumber(__valY) then
+                __targetY = tonumber(__valY)
+            else
+                warn("[DIO] BoatWantY loi: " .. tostring(__valY))
             end
-            local __boatH = __seatH:FindFirstAncestorOfClass("Model")
-            if not __boatH or not __boatH.Parent then return end
-            if type(__DIO_IsMyBoat) == "function" and not __DIO_IsMyBoat(__boatH) then return end
-            local __wantYH = __DIO_BoatWantY()
-            __DIO_CruiseWantY = __wantYH
-            local __dyH = __wantYH - __seatH.Position.Y
-            local __rootH = __seatH.AssemblyRootPart or __seatH
-            local __dtvH = tonumber(__dtH) or 0.0167
-            if math.abs(__dyH) > 0.75 then
-                local __spdH = math.clamp(tonumber(_G.BoatTweenSpeed) or 165, 90, 300)
-                local __stepH = math.clamp(__dyH, -__spdH * __dtvH, __spdH * __dtvH)
-                __boatH:PivotTo(__boatH:GetPivot() + Vector3.new(0, __stepH, 0))
+            __targetT = __nowD
+        end
+        if (__nowD - __speedT) >= 0.5 then
+            local __okS, __valS = pcall(__DIO_GetBoatTweenSpeed)
+            if __okS and tonumber(__valS) then __speed = tonumber(__valS) end
+            __speedT = __nowD
+        end
+        if __targetY == nil then
+            __drvOff()
+            return
+        end
+        local __sp = __seatD.Position
+        -- lech ngang > 200 (thuyen bi day/teleport/doi thuyen) -> lay lai goc tai thuyen, giong block.CFrame = HRP.CFrame
+        if __drv == nil or math.sqrt((__drv.X - __sp.X) ^ 2 + (__drv.Z - __sp.Z) ^ 2) > 200 then
+            __drv = __sp
+        end
+        __drv = Vector3.new(__drv.X, __targetY, __drv.Z)
+        if __advance then
+            local __dest = __DIO_CruiseDest
+            if __dest and (__nowD - __dest.t) <= 3 then
+                local __dx = __dest.pos.X - __drv.X
+                local __dz = __dest.pos.Z - __drv.Z
+                local __dist = math.sqrt(__dx * __dx + __dz * __dz)
+                if __dist > 0.5 then
+                    local __step = math.min(__speed * math.clamp(tonumber(__dtD) or 0.0167, 0.001, 0.1), __dist)
+                    __drv = Vector3.new(__drv.X + __dx / __dist * __step, __drv.Y, __drv.Z + __dz / __dist * __step)
+                end
             end
-            local __vH = __rootH.AssemblyLinearVelocity
-            if math.abs(__vH.Y) > 0.01 then
-                __rootH.AssemblyLinearVelocity = Vector3.new(__vH.X, 0, __vH.Z)
-            end
-        end)
-    end)
-end)
-
+        end
+        __DIO_BoatYLockOn = true
+        local __delta = __drv - __sp
+        if __delta.Magnitude > 0.02 then
+            __boatD:PivotTo(__boatD:GetPivot() + __delta)
+        end
+        local __rootD = __seatD.AssemblyRootPart or __seatD
+        __rootD.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        __rootD.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        if (__nowD - __clipT) >= 0.25 then
+            __clipT = __nowD
+            pcall(__DIO_NoClipShipNow, __boatD)
+        end
+    end
+    local __RSD = game:GetService("RunService")
+    local function __guardDrv(__dtG, __advG)
+        local __okG, __errG = pcall(__tickDrv, __dtG, __advG)
+        if not __okG then
+            __drvOff()
+            warn("[DIO] Find cruise driver loi: " .. tostring(__errG))
+        end
+    end
+    __RSD.Stepped:Connect(function(_, __dtS) __guardDrv(__dtS, false) end)
+    __RSD.Heartbeat:Connect(function(__dtH) __guardDrv(__dtH, true) end)
+end
 
 -- [DIO-GRAFT Banana] Auto Repair Ur Ship: doc mau thuyen tren HUD, thuyen chua
 -- full mau + dang dung gan thuyen cua minh (khong ngoi ghe, khong combat bien)
@@ -5152,13 +5134,6 @@ local Tabs = {
     Misc = Window:MakeTab({ Title = "Misc", Icon = "" })
 }
 
-
-
-
-
-
-
-
 do
     local function __DIO_IsInstance(o)
         if o == nil or type(o) ~= "table" then return false end
@@ -5179,7 +5154,6 @@ do
         if type(self.Callback) == "function" then pcall(self.Callback, v) end
     end
 
-
     local function __DIO_TabContainer(tab)
         if type(tab) ~= "table" then return nil end
         local direct = rawget(tab, "Container")
@@ -5194,7 +5168,6 @@ do
         end
         return nil
     end
-
 
     local function __DIO_FallbackRow(tab, kind, cfg)
         cfg = type(cfg) == "table" and cfg or {}
@@ -5385,7 +5358,6 @@ do
                 end
             end
 
-
             if type(__DIO_tab.AddParagraph) == "function" then
                 local __DIO_realPara = __DIO_tab.AddParagraph
                 __DIO_tab.AddParagraph = function(self, a, b)
@@ -5408,7 +5380,6 @@ do
                     })
                 end
             end
-
 
             if type(__DIO_tab.AddSection) ~= "function" then
                 __DIO_tab.AddSection = function(self, a)
@@ -5993,106 +5964,8 @@ __DIO_MapFarmLive = function(list)
     return false
 end
 do
-    -- [[FIX-DIO-1]] Moi loai element co khoa save rieng.
-    -- Truoc day Toggle "Ship Speed" va Slider "Ship Speed" cung ghi vao
-    -- "UI/SeaEvent/Ship Speed": toggle luu `true` (boolean), lan sau chay lai
-    -- Slider lay Default = true -> redzlib bao loi:
-    --   "Tab.AddSlider.Default". 'number', or 'nil' expected, got boolean
-    local __DIO_KeyKind = {}
-    local function __DIOKey(tabName, name, kind)
-        local base = "UI/" .. tostring(tabName) .. "/" .. tostring(name or "")
-        kind = tostring(kind or "Toggle")
-        if kind == "Toggle" then
-            -- toggle luon giu khoa goc de __DIO_ToggleFlagMap con hoat dong
-            __DIO_KeyKind[base] = "Toggle"
-            return base, base
-        end
-        local prev = __DIO_KeyKind[base]
-        if prev ~= nil and prev ~= kind then
-            local alt = base .. " #" .. kind
-            __DIO_KeyKind[alt] = kind
-            return alt, base
-        end
-        __DIO_KeyKind[base] = kind
-        return base, base
-    end
-    -- [[FIX-DIO-2]] Loc kieu du lieu khi restore save.
-    -- Khong bao gio dua boolean/string vao Default cua Slider (va nguoc lai),
-    -- nho vay save cu / save bi ghi de khong con lam chet luc khoi dong.
-    local function __DIO_Num(v)
-        if type(v) == "number" then
-            if v ~= v or v == math.huge or v == -math.huge then return nil end
-            return v
-        end
-        if type(v) == "string" then
-            local n = tonumber(v)
-            if n ~= nil and n == n then return n end
-        end
-        return nil
-    end
-    local function __DIO_SavedNum(key, legacyKey)
-        local data = _G.SaveData or {}
-        local v = __DIO_Num(rawget(data, key))
-        if v == nil and legacyKey and legacyKey ~= key then
-            v = __DIO_Num(rawget(data, legacyKey))
-            if v ~= nil then pcall(SetSetting, key, v) end
-        end
-        return v
-    end
-    local function __DIO_SavedBool(key, legacyKey)
-        local data = _G.SaveData or {}
-        local v = rawget(data, key)
-        if type(v) ~= "boolean" and legacyKey and legacyKey ~= key then
-            local v2 = rawget(data, legacyKey)
-            if type(v2) == "boolean" then v = v2 end
-        end
-        if type(v) == "boolean" then return v end
-        return nil
-    end
-    local function __DIO_SavedSel(key, legacyKey, multi)
-        local data = _G.SaveData or {}
-        local v = rawget(data, key)
-        if v == nil and legacyKey and legacyKey ~= key then v = rawget(data, legacyKey) end
-        if multi == true then
-            if type(v) == "table" then
-                local arr, n = {}, 0
-                for k, on in pairs(v) do
-                    if on == true and type(k) == "string" then
-                        n = n + 1 arr[n] = k
-                    elseif type(k) == "number" and type(on) == "string" then
-                        n = n + 1 arr[n] = on
-                    end
-                end
-                return arr
-            elseif type(v) == "string" and v ~= "" then
-                return { v }
-            end
-            return nil
-        end
-        if type(v) == "string" then return v end
-        return nil
-    end
-    -- [[FIX-DIO-3]] Tao element an toan: neu UI lib nem loi thi bo Default roi thu lai,
-    -- de 1 dong config sai khong lam chet ca hub.
-    local function __DIO_SafeAdd(fn, self, Setting, kind)
-        local ok, res = pcall(fn, self, Setting)
-        if ok then return res end
-        pcall(function()
-            warn("[DIO] " .. tostring(kind) .. " '" .. tostring(Setting and (Setting.Name or Setting.Title))
-                .. "' loi: " .. tostring(res))
-        end)
-        if type(Setting) == "table" then
-            local fix = {}
-            for k, v in pairs(Setting) do fix[k] = v end
-            fix.Default = nil
-            local ok2, res2 = pcall(fn, self, fix)
-            if ok2 then return res2 end
-            pcall(function()
-                warn("[DIO] " .. tostring(kind) .. " '" .. tostring(Setting and (Setting.Name or Setting.Title))
-                    .. "' van loi khi bo Default: " .. tostring(res2))
-            end)
-        end
-        return nil
+    local function __DIOKey(tabName, name)
+        return "UI/" .. tostring(tabName) .. "/" .. tostring(name or "")
     end
     local function __DIO_DeepEq(a, b)
         if a == b then return true end
@@ -6112,13 +5985,10 @@ do
         local _AddToggle = tab.AddToggle
         if type(_AddToggle) == "function" then
             function tab:AddToggle(Setting)
-                local key, legacyKey = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title), "Toggle")
-                local saved = __DIO_SavedBool(key, legacyKey)
+                local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title))
+                local saved = GetSetting(key, nil)
                 if _G.DIO_AutoRestore == true and Setting and saved ~= nil then
                     Setting.Default = saved
-                end
-                if Setting and type(Setting.Default) ~= "boolean" then
-                    Setting.Default = false
                 end
                 local origCb = Setting and Setting.Callback
                 local __userTouched = false
@@ -6203,7 +6073,6 @@ do
                                     __DIO_OffEdgeT = 0
                                     __DIO_PrevAnyOn = true
                                     pcall(__DIO_TweenClearBlock)
-                                    __DIO_FalseSince = nil
                                     shouldTween = true
                                     if type(__DIO_Move) == "function" then pcall(__DIO_Move) end
                                     pcall(function() if type(__DIO_HlOn) == "function" then __DIO_HlOn() end end)
@@ -6214,7 +6083,6 @@ do
                             for __k in pairs(__ownedFlags or {}) do __newFlag = true break end
                             local __onNow = __DIO_TweenOnIfAnyFlag()
                             if __onNow then
-                                __DIO_FalseSince = nil
                                 __DIO_TweenBlockT = 0
                                 shouldTween = true
                                 pcall(function() __DIO_Wake(true) end)
@@ -6261,11 +6129,7 @@ do
                                     return
                                 end
                                 __DIO_TweenTarget = nil
-                                __DIO_LastTweenTarget = nil
-                                __DIO_FalseSince = nil
-                                __DIO_Parked = false
                                 __DIO_DropPendT = 0
-                                __DIO_DropPendReason = nil
                                 if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
                                 pcall(__DIO_TweenBlock, 0.35)
                                 if not __DIO_FlyBusy then
@@ -6286,7 +6150,7 @@ do
                         end
                     end
                 end
-                local ctrl = __DIO_SafeAdd(_AddToggle, self, Setting, "AddToggle")
+                local ctrl = _AddToggle(self, Setting)
                 if _G.DIO_AutoRestore == true and saved ~= nil and origCb then
                     task.delay(3, function()
                         if not __userTouched then
@@ -6300,10 +6164,19 @@ do
         local _AddDropdown = tab.AddDropdown
         if type(_AddDropdown) == "function" then
             function tab:AddDropdown(Setting)
-                local key, legacyKey = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title), "Dropdown")
-                local saved = __DIO_SavedSel(key, legacyKey, Setting and Setting.MultiSelect == true)
+                local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title))
+                local saved = GetSetting(key, nil)
+                local __savedCb = saved
                 if Setting and saved ~= nil then
-                    Setting.Default = saved
+                    if Setting.MultiSelect and type(saved) == "table" then
+                        local __arrD = {}
+                        for __kD, __vD in pairs(saved) do
+                            if __vD == true and type(__kD) == "string" then table.insert(__arrD, __kD) end
+                        end
+                        Setting.Default = __arrD
+                    else
+                        Setting.Default = saved
+                    end
                 end
                 local origCb = Setting and Setting.Callback
                 local __userTouched = false
@@ -6314,7 +6187,6 @@ do
                             SetSetting(key, Value)
                         end
                         __DIO_TweenBlockT = 0
-                        __DIO_FalseSince = nil
                         local __beforeD = {}
                         pcall(function()
                             for k, v in pairs(_G) do
@@ -6332,7 +6204,6 @@ do
                         end)
                         pcall(function()
                             if type(__DIO_TweenOnIfAnyFlag) == "function" and __DIO_TweenOnIfAnyFlag() then
-                                __DIO_FalseSince = nil
                                 pcall(function() __DIO_Wake(true) end)
                             end
                         end)
@@ -6345,7 +6216,7 @@ do
                         end)
                     end
                 end
-                local ctrl = __DIO_SafeAdd(_AddDropdown, self, Setting, "AddDropdown")
+                local ctrl = _AddDropdown(self, Setting)
                 if _G.DIO_AutoRestore == true and saved ~= nil and origCb then
                     task.delay(3, function()
                         if not __userTouched then
@@ -6359,22 +6230,10 @@ do
         local _AddSlider = tab.AddSlider
         if type(_AddSlider) == "function" then
             function tab:AddSlider(Setting)
-                local key, legacyKey = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title), "Slider")
-                local saved = __DIO_SavedNum(key, legacyKey)
-                if Setting then
-                    local value = saved
-                    if value == nil then value = __DIO_Num(Setting.Default) end
-                    local lo, hi = __DIO_Num(Setting.Min), __DIO_Num(Setting.Max)
-                    if lo == nil then lo = 0 end
-                    if hi == nil then hi = 100 end
-                    if lo > hi then lo, hi = hi, lo end
-                    if value ~= nil then
-                        if value < lo then value = lo elseif value > hi then value = hi end
-                    end
-                    -- Default cua Slider bat buoc la number hoac nil (khong duoc boolean)
-                    Setting.Default = value
-                    Setting.Min, Setting.Max = lo, hi
-                    if __DIO_Num(Setting.Increment) == nil then Setting.Increment = 1 end
+                local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title))
+                local saved = GetSetting(key, nil)
+                if Setting and saved ~= nil then
+                    Setting.Default = saved
                 end
                 local origCb = Setting and Setting.Callback
                 local __userTouched = false
@@ -6387,7 +6246,7 @@ do
                         pcall(origCb, Value)
                     end
                 end
-                local ctrl = __DIO_SafeAdd(_AddSlider, self, Setting, "AddSlider")
+                local ctrl = _AddSlider(self, Setting)
                 if _G.DIO_AutoRestore == true and saved ~= nil and origCb then
                     task.delay(3, function()
                         if not __userTouched then
@@ -6401,7 +6260,7 @@ do
         local _AddButton = tab.AddButton
         if type(_AddButton) == "function" then
             function tab:AddButton(Setting)
-                local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title), "Button")
+                local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title))
                 local origCb = Setting and Setting.Callback
                 if Setting and origCb then
                     Setting.Callback = function(...)
@@ -6434,7 +6293,7 @@ do
                         return __okB
                     end
                 end
-                return __DIO_SafeAdd(_AddButton, self, Setting, "AddButton")
+                return _AddButton(self, Setting)
             end
         end
     end
@@ -6510,7 +6369,6 @@ spawn(function()
         __DIO_wait(2)
     end
 end)
-
 
 local NextFoDSpawn = Tabs.Status:AddParagraph("Next Time Spawn Fist of Darkness or God's Chalice", "")
 local function __DIO_GetOldestLocation()
@@ -6776,7 +6634,8 @@ end
 local __DIO_GHOST_NODMG = 8
 local __DIO_GHOST_BURST = 5
 local __DIO_GHOST_SKIP_OFF = 6
-local __DIO_GHOST_RANGE = 150
+local __DIO_GHOST_RANGE = 90
+local __DIO_GHOST_GAP = 2.5
 local function __DIO_GhostCheck(mob)
     if not mob or not mob.Parent then return true end
     local hum = mob:FindFirstChild("Humanoid")
@@ -6788,9 +6647,19 @@ local function __DIO_GhostCheck(mob)
     local curHp = hum.Health
     local d = __DIO_GhostData[mob]
     if not d then
-        __DIO_GhostData[mob] = { hp = curHp, t = __nowG, burstT = 0, fireT = 0 }
+        __DIO_GhostData[mob] = { hp = curHp, t = __nowG, burstT = 0, fireT = 0, seen = __nowG }
         return false
     end
+    -- Chi tinh khi dang danh LIEN TUC mob nay: vong farm goi GhostCheck moi vai chuc ms.
+    -- Ngat quang > GAP (doi muc tieu, bay di, quay lai mob cu) thi bo du lieu cu va dem lai
+    -- tu dau; truoc day moc d.t cu lam skill bi spam ngay khi vua quay lai mob / vua bat toggle.
+    if (__nowG - (d.seen or 0)) > __DIO_GHOST_GAP then
+        d.hp = curHp
+        d.t = __nowG
+        d.burstT = 0
+        d.fireT = 0
+    end
+    d.seen = __nowG
     if curHp ~= d.hp then
         -- Mob co bien dong mau (danh trung / hoi mau) -> khong phai ghost, dem lai tu dau.
         d.hp = curHp
@@ -6870,9 +6739,6 @@ function __DIO_FarmHardStop()
     pcall(__DIO_GhostReset)
     __DIO_CakeBoss = nil
 end
-
-
-
 
 function __DIO_3nn_GetTrackedQuestText()
     local __ok, __txt = pcall(function()
@@ -7196,9 +7062,6 @@ __DIO_SafeLoop(function()
                     __DIO_wait(1)
                     return
                 end
-
-
-
 
                 if _G.AutoQuest then
                     if hasQuest and __DIO_3nn_HasActiveQuestFor(questData[1]) then
@@ -8455,7 +8318,6 @@ Tabs.Main:AddToggle({
         _G.AutoAttackDoughKing = (Value == true)
         if _G.AutoAttackDoughKing then
             __DIO_TweenBlockT = 0
-            __DIO_FalseSince = nil
             pcall(function() __DIO_TweenOnIfAnyFlag() end)
             pcall(function() __DIO_Wake(true) end)
         else
@@ -8903,7 +8765,7 @@ __DIO_PhaBinhSummon = function()
     end
 end
 Tabs.Main:AddSection("Farm Material")
-Test = Tabs.Main:AddDropdown({
+Tabs.Main:AddDropdown({
 Name = __DIO_T["Choose Material"],
 		Description = "",
 		Options = MaterialList,
@@ -9383,7 +9245,7 @@ Callback = function(Value)
   _G.Neartween = (Value == true)
 end})
 _G.FastAttackMob = false
-Q = Tabs.Settings:AddToggle({
+Tabs.Settings:AddToggle({
 Name = __DIO_T["Fast Attack Mob 2"],
 Description = "Can Lag Mob Or Drop fps 2 Loop Fast attack",
 Default = false,
@@ -9392,7 +9254,7 @@ Callback = function(Value)
 end})
 Tabs.Settings:AddToggle({
 Name = __DIO_T["Attack No Animation"],
-Description = "M1", 
+Description = "M1",
 Default = false,
 Callback = function(Value)
   _G.AttackNoAnim = (Value == true)
@@ -10263,7 +10125,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L6542")
-Zou = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Quest Sea 3"],
 Description = "",
 Default = false,
@@ -10505,7 +10367,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L6793")
-Pray = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Pray Gravestone"],
 Description = "",
 Default = false,
@@ -10630,7 +10492,7 @@ Tabs.Quests:AddToggle({
     end
 })
 Tabs.Quests:AddSection("Tushita + Yama")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Tushita Sword"],
 Description = "",
 Default = false,
@@ -10638,7 +10500,7 @@ Callback = function(Value)
   -- FIX: bat toggle -> du 3 lop _G.Auto_Tushita + shouldTween = true + highlight
   __DIO_FeatToggle("Auto_Tushita", Value)
 end})
--- ===== port 1:1 logic GetTushita() cua 3nn =====
+-- port 1:1 logic GetTushita() cua 3nn
 -- port checkTorch(): tim torch chua sang trong Workspace.Map.Turtle.QuestTorches (Torch1..5)
 __DIO_TushitaCheckTorch = function()
     local __ok, __res = pcall(function()
@@ -10753,7 +10615,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L6981")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Yama Sword"],
 Description = "",
 Default = false,
@@ -10781,7 +10643,7 @@ __DIO_SafeLoop(function()
         return
       end
       __DIO_ReleaseFlag("Auto_Yama", "FarmEliteHunt")
-      -- ===== port 1:1 phan workspace cua GetYama() (3nn) =====
+      -- port 1:1 phan workspace cua GetYama() (3nn)
       local __map = workspace:FindFirstChild("Map")
       local __wf = __map and __map:FindFirstChild("Waterfall")
       local __sk = __wf and __wf:FindFirstChild("SealedKatana")
@@ -11033,7 +10895,7 @@ __DIO_SafeLoop(function()
   end
 end, "L7228")
 Tabs.Quests:AddSection("Cursed Dual Katana")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Get CDK [ Last Quest ]"],
 Description = "",
 Default = false,
@@ -11062,7 +10924,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L7278")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Yama CDK"],
 Description = "",
 Default = false,
@@ -11196,7 +11058,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L7401")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Tushita CDK"],
 Description = "",
 Default = false,
@@ -11321,7 +11183,7 @@ Description = "",
 Callback = function()
   replicated.Remotes.CommF_:InvokeServer("MysteriousMan","2")
 end})
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Tween to Legendary Sword Dealer"],
 Description = "",
 Default = false,
@@ -11339,8 +11201,8 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L7579")
-Tabs.Quests:AddSection("Dark Blade V3[Beta] Update Soon") 
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddSection("Dark Blade V3[Beta] Update Soon")
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Dark Blade V3"],
 Description = "",
 Default = false,
@@ -11370,7 +11232,7 @@ __DIO_SafeLoop(function()
   end
 end, "L7981")
 Tabs.Quests:AddSection("Pole / God Enal's")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Pole V1"],
 Description = "",
 Default = false,
@@ -11391,7 +11253,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L7599")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Pole V2 [Beta]"],
 Description = "",
 Default = false,
@@ -11445,7 +11307,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L7654")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Saber Sword"],
 Description = "",
 Default = false,
@@ -11525,7 +11387,7 @@ if replicated.Remotes.CommF_:InvokeServer("ProQuestProgress","RichSon") == nil t
     end)
   end
 end, "L7674")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Cybrog"],
 Description = "",
 Default = false,
@@ -11544,7 +11406,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L7756")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Usoap's Hat"],
 Description = "",
 Default = false,
@@ -11566,7 +11428,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L7775")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Bisento V2"],
 Description = "",
 Default = false,
@@ -11590,7 +11452,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L7797")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Warden Sword"],
 Description = "",
 Default = false,
@@ -11609,7 +11471,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L7821")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Marine Coat"],
 Description = "",
 Default = false,
@@ -11628,7 +11490,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L7840")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Swan Coat"],
 Description = "",
 Default = false,
@@ -11648,7 +11510,7 @@ __DIO_SafeLoop(function()
   end
 end, "L7859")
 Tabs.Quests:AddSection("Rengoku Sword")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Rengoku Sword"],
 Description = "",
 Default = false,
@@ -11669,7 +11531,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L7880")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Key Rengoku"],
 Description = "",
 Default = false,
@@ -11693,7 +11555,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L7900")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Dragon Trident"],
 Description = "",
 Default = false,
@@ -11712,7 +11574,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L7924")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Long Sword"],
 Description = "",
 Default = false,
@@ -11731,7 +11593,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L7943")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Black Spikey"],
 Description = "",
 Default = false,
@@ -11750,7 +11612,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L7962")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Midnight Blade"],
 Description = "",
 Default = false,
@@ -11775,7 +11637,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L8007")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Darkbeard"],
 Description = "",
 Default = false,
@@ -11800,7 +11662,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L8032")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Unlocked DonSwan"],
 Description = "",
 Default = false,
@@ -11850,7 +11712,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L8055")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Swan Glasses"],
 Description = "",
 Default = false,
@@ -11870,7 +11732,7 @@ __DIO_SafeLoop(function()
   end
 end, "L8105")
 Tabs.Quests:AddSection("Cavender + Twin Hooks + Bigmom")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Bigmom"],
 Description = "",
 Default = false,
@@ -11889,7 +11751,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L8126")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Canvendish Sword"],
 Description = "",
 Default = false,
@@ -11908,7 +11770,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L8145")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Twin Hooks"],
 Description = "",
 Default = false,
@@ -11939,7 +11801,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L8164")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Serpent Bow"],
 Description = "",
 Default = false,
@@ -11958,7 +11820,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L8185")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Lei Accessory"],
 Description = "",
 Default = false,
@@ -12006,7 +11868,7 @@ Callback = function(Value)
   end
 end})
 Tabs.Quests:AddSection("Buso/Aura Colours")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Teleport Barista Cousin"],
 Description = "",
 Default = false,
@@ -12030,7 +11892,7 @@ Description = "",
 Callback = function()
   replicated.Remotes.CommF_:InvokeServer("ColorsDealer","2")
 end})
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Rainbow Colors"],
 Description = "",
 Default = false,
@@ -12107,7 +11969,7 @@ spawn(function()
   task.wait(0.5)
   end
 end)
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Accept Rainbow Quest Faster"],
 Description = "",
 Default = false,
@@ -12167,7 +12029,7 @@ __DIO_SafeLoop(function()
         pcall(__DIO_KenFetch)
     end
 end, "KenCheck")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Farm Observation"],
 Description = "",
 Default = false,
@@ -12265,7 +12127,7 @@ __DIO_ForestQuest50 = function()
   end
   return { IsActive = false }
 end
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Observation V2"],
 Description = "",
 Default = false,
@@ -12469,7 +12331,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L8616")
-Q = Tabs.Quests:AddToggle({
+Tabs.Quests:AddToggle({
 Name = __DIO_T["Auto Training Dummy"],
 Description = "",
 Default = false,
@@ -12628,7 +12490,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L8787")
-DeathStep = Tabs.Shop:AddToggle({
+Tabs.Shop:AddToggle({
 Name = __DIO_T["Auto DeathStep"],
 Description = "",
 Default = false,
@@ -12708,7 +12570,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L8872")
-ElectricClaw = Tabs.Shop:AddToggle({
+Tabs.Shop:AddToggle({
 Name = __DIO_T["Auto ElectricClaw"],
 Description = "",
 Default = false,
@@ -12739,7 +12601,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L8913")
-DragonTalon = Tabs.Shop:AddToggle({
+Tabs.Shop:AddToggle({
 Name = __DIO_T["Auto DragonTalon"],
 Description = "",
 Default = false,
@@ -12769,7 +12631,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L8945")
-Godhuman = Tabs.Shop:AddToggle({
+Tabs.Shop:AddToggle({
 Name = __DIO_T["Auto Godhuman"],
 Description = "",
 Default = false,
@@ -12786,28 +12648,24 @@ __DIO_SafeLoop(function()
         if __need == "Bring me 20 Fish Tails, 20 Magma Ore, 10 Dragon Scales and 10 Mystic Droplets." then
           if GetM("Dragon Scale") == false or GetM("Dragon Scale") < 10 then
             if World3 then
-              Lv = 1575
               __DIO_BorrowFlag("Auto_God_Human","Level")
             else
               replicated.Remotes.CommF_:InvokeServer("TravelZou")
             end
           elseif GetM("Fish Tail") == false or GetM("Fish Tail") < 20 then
             if World3 then
-              Lv = 1775
               __DIO_BorrowFlag("Auto_God_Human","Level")
             else
               replicated.Remotes.CommF_:InvokeServer("TravelZou")
             end
           elseif GetM("Mystic Droplet") == false or GetM("Mystic Droplet") < 10 then
             if World2 then
-              Lv = 1425
               __DIO_BorrowFlag("Auto_God_Human","Level")
             else
               replicated.Remotes.CommF_:InvokeServer("TravelDressrosa")
             end
           elseif GetM("Magma Ore") == false or GetM("Magma Ore") < 20 then
             if World2 then
-              Lv = 1175
               __DIO_BorrowFlag("Auto_God_Human","Level")
             else
               replicated.Remotes.CommF_:InvokeServer("TravelDressrosa")
@@ -12822,7 +12680,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L8975")
-SanguineArt = Tabs.Shop:AddToggle({
+Tabs.Shop:AddToggle({
 Name = __DIO_T["Auto SanguineArt"],
 Description = "",
 Default = false,
@@ -12923,7 +12781,7 @@ Callback = function(Value)
       StopTween(false)
       __DIO_CurTarget = nil
       if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
-      if not __DIO_FindAnyOn() then __DIO_CruiseStop() end
+      if not __DIO_FindAnyOn() then __DIO_CruiseStop("mirage") end
   end
 end})
 __DIO_SafeLoop(function()
@@ -12949,16 +12807,16 @@ __DIO_SafeLoop(function()
             if not _G.FindMirage then break end
             __DIO_NoClipShipNow()
             -- [DIO-FIX] Mot nguon Y duy nhat cho ca 4 Find (Fly Boat / Sea Event Y)
-            local __wantYR = __DIO_CruiseFeed()
+            local __wantYR = __DIO_CruiseFeed("mirage")
             __dest = __DIO_FindCruiseDest(__wantYR)
-            _tp(__dest)
+            __DIO_CruiseGo("mirage", __dest)
             __found = __loc and __loc:FindFirstChild("Mirage Island", true)
             if not __found and __mapM and __mapM:FindFirstChild("MysticIsland") then
               __found = __mapM:FindFirstChild("MysticIsland")
               __mi = __found
             end
           until not _G.FindMirage or __found or (__dest.Position - __hrpR.Position).Magnitude <= 10 or not __humR.Sit
-          __DIO_CruiseStop()
+          if __found or not _G.FindMirage then __DIO_CruiseStop("mirage") end
           -- [DIO-FIX] Chi roi ghe khi DA thay dao. Thoat vong vi ly do khac (tat toggle,
           -- ghe nhay Sit tam thoi...) thi GIU ngoi de vong ngoai tiep tuc cruise on dinh.
           if __found then
@@ -12979,7 +12837,7 @@ __DIO_SafeLoop(function()
             __cfM = __srcM.CFrame
           end)
           if not __cfM then return end
-          __DIO_CruiseStop()
+          __DIO_CruiseStop("mirage")
           -- Da thay Mirage: tat cruise Y slider, ve Y 31 (mat nuoc) nhu cu
           local __goalM = CFrame.new(__cfM.Position.X, 31, __cfM.Position.Z)
           -- FIX: da dung tren Mirage roi -> khong _tp lap lai moi giay (giu shouldTween/highlight nong mai)
@@ -13451,7 +13309,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L9622")
-Train = Tabs.Race:AddToggle({
+Tabs.Race:AddToggle({
 Name = __DIO_T["Auto Train V4"],
 Description = "",
 Default = false,
@@ -13543,7 +13401,7 @@ Callback = function()
         end
     end
 })
-Doors = Tabs.Race:AddToggle({
+Tabs.Race:AddToggle({
 Name = __DIO_T["Auto Teleport to Race Doors"],
 Description = "",
 Default = false,
@@ -13571,7 +13429,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L9740")
-Trials = Tabs.Race:AddToggle({
+Tabs.Race:AddToggle({
 Name = __DIO_T["Auto Complete Trial Race"],
 Description = "",
 Default = false,
@@ -14159,7 +14017,7 @@ Tabs.Prehistoric:AddToggle({
             StopTween(false)
             __DIO_CurTarget = nil
             if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
-            if not __DIO_FindAnyOn() then __DIO_CruiseStop() end
+            if not __DIO_FindAnyOn() then __DIO_CruiseStop("prehis") end
         end
     end
 })
@@ -14187,10 +14045,10 @@ __DIO_SafeLoop(function()
                     -- dich cruise do __DIO_FindCruiseDest quyet dinh (ping-pong 10km / 1 chieu)
                     __DIO_NoClipShipNow()
                     -- [DIO-FIX] Mot nguon Y duy nhat cho ca 4 Find (Fly Boat / Sea Event Y)
-                    local __wantYP = __DIO_CruiseFeed()
-                    _tp(__DIO_FindCruiseDest(__wantYP))
+                    local __wantYP = __DIO_CruiseFeed("prehis")
+                    __DIO_CruiseGo("prehis", __DIO_FindCruiseDest(__wantYP))
                 else
-                    __DIO_CruiseStop()
+                    __DIO_CruiseStop("prehis")
                     local stoneHead =
                         prehistoricLoc:FindFirstChild("HeadTeleport", true)
                         or prehistoricLoc:FindFirstChild("Teleport_Head", true)
@@ -14469,7 +14327,7 @@ __DIO_SeaNormList = function(Value, opts, def)
 end
 _G.SeaEventWeaponList = __DIO_SeaNormList(GetSetting("UI/SeaEvent/Select Weapon Sea Event", nil), __DIO_SeaWpOpts, "Melee")
 _G.SeaEventSkillList  = __DIO_SeaNormList(GetSetting("UI/SeaEvent/Select Skill", nil), __DIO_SeaSkillOpts, "Z")
-Q = Tabs.SeaEvent:AddDropdown({
+Tabs.SeaEvent:AddDropdown({
     Name = __DIO_T["Select Weapon Sea Event"],
     Options = __DIO_SeaWpOpts,
     Default = _G.SeaEventWeaponList,
@@ -14478,7 +14336,7 @@ Q = Tabs.SeaEvent:AddDropdown({
         _G.SeaEventWeaponList = __DIO_SeaNormList(Value, __DIO_SeaWpOpts, "Melee")
     end
 })
-Q = Tabs.SeaEvent:AddDropdown({
+Tabs.SeaEvent:AddDropdown({
     Name = __DIO_T["Select Skill"],
     Options = __DIO_SeaSkillOpts,
     Default = _G.SeaEventSkillList,
@@ -14498,7 +14356,7 @@ __DIO_SeaEntityMap = {
     ["Haunted Crew Member"] = "HCM",
     ["PirateGrandBrigade"]  = "PGB",
 }
-Q = Tabs.SeaEvent:AddDropdown({
+Tabs.SeaEvent:AddDropdown({
     Name = __DIO_T["Select Sea Event"],
     Options = {"Terror Shark","Piranha","Shark","Sea Beast","Fish Boat","Fish Crew Member","Haunted Crew Member","PirateGrandBrigade"},
     Default = {},
@@ -14553,14 +14411,14 @@ Q = Tabs.SeaEvent:AddDropdown({
         end
     end
 })
-Q = Tabs.SeaEvent:AddDropdown({
+Tabs.SeaEvent:AddDropdown({
 Name = __DIO_T["Select Sea Level"],
 Options = ListSeaZone,
 Default = "Lv 6",
 Callback = function(Value)
   _G.DangerSc = Value
 end})
-Q = Tabs.SeaEvent:AddDropdown({
+Tabs.SeaEvent:AddDropdown({
     Name = __DIO_T["Select Boats"],
 	Options = ListSeaBoat,
 	Default = "Guardian",
@@ -14754,7 +14612,7 @@ Tabs.SeaEvent:AddToggle({
     end
 })
 
-Q = Tabs.SeaEvent:AddToggle({
+Tabs.SeaEvent:AddToggle({
 Name = __DIO_T["Auto Sea Event"],
 Description = "",
 Default = false,
@@ -14797,7 +14655,6 @@ __DIO_SafeLoop(function()
                 local __spV7 = __seatV4.CFrame.Position
                 if (__hrpV7.Position - __spV7).Magnitude <= 8 and __hrpV7.Position.Y >= __spV7.Y - 1 then
                     __DIO_TweenTarget = nil
-                    __DIO_LastDist = nil __DIO_LastHRPPos = nil
                     __hrpV7.AssemblyLinearVelocity = Vector3.new(0, -15, 0)
                     return
                 end
@@ -14992,7 +14849,7 @@ __DIO_SeaSkillAtk = function()
         __DIO_wait(.1) Useskills("Gun","Z") Useskills("Gun","X")
     end
 end
--- ============ SEA EVENT: chan 2 tween "danh nhau" (FIX lan 2) ============
+-- SEA EVENT: chan 2 tween "danh nhau" (FIX lan 2)
 -- Bug thuc te: co Sea Beast / Terror Shark -> tween gan thang thuyen den mob, danh 1-2 hit roi
 -- tween farm mob nhay khoi thuyen de danh, con tween boat (mover VehicleSeat) thi cu 0.25s
 -- lai ep Sit nguoi choi vao ghe -> 2 tween danh nhau lien tuc.
@@ -15136,7 +14993,7 @@ Callback = function(Value)
       StopTween(false)
       __DIO_CurTarget = nil
       if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
-      if not __DIO_FindAnyOn() then __DIO_CruiseStop() end
+      if not __DIO_FindAnyOn() then __DIO_CruiseStop("kitsune") end
   end
 end})
 __DIO_SafeLoop(function()
@@ -15186,9 +15043,9 @@ __DIO_SafeLoop(function()
             if not _G.AutofindKitIs then break end
             __DIO_NoClipShipNow()
             -- [DIO-FIX] Mot nguon Y duy nhat cho ca 4 Find (Fly Boat / Sea Event Y)
-            local __wantYK = __DIO_CruiseFeed()
+            local __wantYK = __DIO_CruiseFeed("kitsune")
             __dest = __DIO_FindCruiseDest(__wantYK)
-            _tp(__dest)
+            __DIO_CruiseGo("kitsune", __dest)
             __found = __loc and __loc:FindFirstChild("Kitsune Island", true)
             -- FIX: khi dang quet bien ma dao spawn o Map.KitsuneIsland thi nhan luon (dung cho vong ngoai)
             if not __found then
@@ -15200,7 +15057,7 @@ __DIO_SafeLoop(function()
               end
             end
           until not _G.AutofindKitIs or __found or (__dest.Position - __hrpR.Position).Magnitude <= 10 or not __humR.Sit
-          __DIO_CruiseStop()
+          if __found or not _G.AutofindKitIs then __DIO_CruiseStop("kitsune") end
           -- [DIO-FIX] Chi roi ghe khi DA thay dao (ly do thoat khac thi giu ngoi, tranh giat ghe)
           if __found then
             pcall(function()
@@ -15210,7 +15067,7 @@ __DIO_SafeLoop(function()
             end)
           end
         else
-          __DIO_CruiseStop()
+          __DIO_CruiseStop("kitsune")
           -- FIX: da dung tren dao roi thi khong _tp lap lai (tranh giu shouldTween/highlight nong mai)
           if __foundCF then
             local __chK = plr.Character
@@ -15583,7 +15440,7 @@ Tabs.SeaEvent:AddToggle({
             StopTween(false)
             __DIO_CurTarget = nil
             if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
-            if not __DIO_FindAnyOn() then __DIO_CruiseStop() end
+            if not __DIO_FindAnyOn() then __DIO_CruiseStop("frozen") end
         end
     end
 })
@@ -15611,24 +15468,23 @@ __DIO_SafeLoop(function()
             __DIO_NoClipShipNow()
             if not __DIO_AllFriendsAboard(__DIO_MyBoat()) then
               __DIO_TweenTarget = nil
-              __DIO_LastTweenTarget = nil
               if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
               -- [DIO-FIX] Cho ban len thuyen: dung yen (da huy tween) nhung VAN feed
               -- cruise de holder giu Y slider, khong de thuyen chim xuong Y 31 roi
               -- bay len lai moi lan co nguoi len/xuong ghe (giat Y).
-              __DIO_CruiseFeed()
+              __DIO_CruiseFeed("frozen")
               continue
             end
             -- [DIO-FIX] Mot nguon Y duy nhat cho ca 4 Find (Fly Boat / Sea Event Y)
-            local __wantYF = __DIO_CruiseFeed()
+            local __wantYF = __DIO_CruiseFeed("frozen")
             __dest = __DIO_FindCruiseDest(__wantYF)
-            _tp(__dest)
+            __DIO_CruiseGo("frozen", __dest)
             __found = __loc and __loc:FindFirstChild("Frozen Dimension", true)
             if not __found and __mapF0 and __mapF0:FindFirstChild("LeviathanGate") then
               __found = __mapF0:FindFirstChild("LeviathanGate")
             end
           until not _G.FrozenDimension or __found or (__dest.Position - __hrpR.Position).Magnitude <= 10 or not __humR.Sit
-          __DIO_CruiseStop()
+          if __found or not _G.FrozenDimension then __DIO_CruiseStop("frozen") end
           -- [DIO-FIX] Chi roi ghe khi DA thay Frozen Dimension/gate (ly do khac thi giu ngoi)
           if __found then
             pcall(function()
@@ -15638,7 +15494,7 @@ __DIO_SafeLoop(function()
             end)
           end
         else
-          __DIO_CruiseStop()
+          __DIO_CruiseStop("frozen")
           local __mapF = workspace:FindFirstChild("Map")
           local __gate = __mapF and __mapF:FindFirstChild("LeviathanGate")
           local __srcF = __gate or __found
@@ -15689,8 +15545,6 @@ Callback = function(Value)
    _G.ShotHL = Value
 end})
 local isRunning = false
-
-
 
 __DIO_SafeLoop(function()
     while __DIO_wait(0.5) do
@@ -16507,9 +16361,6 @@ spawn(function()
     end)
 end)
 
-
-
-
 __RAID_Sea2 = (game.PlaceId == 4442272183 or game.PlaceId == 79091703265657)
 __RAID_Sea3 = (game.PlaceId == 7449423635 or game.PlaceId == 100117331123089)
 __RAID_IsMobAlive = function(K)
@@ -16713,8 +16564,6 @@ __RAID_RaidList = {}
 pcall(function()
     local s = require(__SVC_RS:WaitForChild("Raids", 10))
 
-
-
     local __seen = {}
     for _, y in next, s do
         if type(y) == "table" then
@@ -16745,11 +16594,6 @@ __RAID_NormMulti = function(Value, opts)
     for _, o in ipairs(opts) do if table.find(raw, o) then table.insert(out, o) end end
     return out
 end
-
-
-
-
-
 
 Tabs.Raids:AddSection("Raids")
 _G.SelectWeaponRaid = "Melee"
@@ -16921,8 +16765,6 @@ __DIO_SafeLoop(function()
     end
 end, "L-AWAKE")
 
-
-
 Tabs.Raids:AddSection("Multi Raid")
 __RAID_MultiNames = {}
 for _, p in pairs(__SVC_PLR:GetChildren()) do
@@ -16972,9 +16814,6 @@ __RAID_NearSlot = function(slots)
     end
 end
 __RAID_MultiReady = function(slots)
-
-
-
 
     local E = {}
     if _G.SelectPlayerMultiRaid then
@@ -17097,8 +16936,6 @@ __DIO_SafeLoop(function()
     end
 end, "L-MRAID")
 
-
-
 Tabs.Raids:AddSection("Join Dungeon")
 __RAID_JoinNames = {}
 for _, p in pairs(__SVC_PLR:GetChildren()) do
@@ -17203,9 +17040,6 @@ __DIO_SafeLoop(function()
         end
     end
 end, "L-JDUNG")
-
-
-
 
 Tabs.Raids:AddSection("Dungeon")
 _G.SelectWeaponDungeon = "Melee"
@@ -17367,7 +17201,6 @@ __RAID_ShootM1 = function(E)
         local ch = plr.Character
         if not ch then return end
         local gunName = __RAID_ToolName("Gun")
-
 
         if not gunName or not ch:FindFirstChild(gunName) then return end
         local ok, CU = pcall(function() return require(__SVC_RS.Modules.CombatUtil) end)
@@ -17561,9 +17394,6 @@ __DIO_SafeLoop(function()
         end
     end
 end, "L-DCARD")
-
-
-
 
 Tabs.Raids:AddSection("Law Raid")
 __RAID_BuyLawChip = function()
@@ -18481,7 +18311,7 @@ __DIO_FlyTo = function(targetCF, arriveDist, cancelFn)
     return __ok
 end
 __DIO_BuyFlying = false
--- ================= FIX "Auto Buy Melee" (port logic Fighting Shop cua 3nn) =================
+-- FIX "Auto Buy Melee" (port logic Fighting Shop cua 3nn)
 -- Logic cu: tinh toa do 1 LAN (NPC chua stream -> fallback toa do cung) + dung cach NPC 8+ stud
 -- -> tween sai cho / den noi ma remote mua khong nhan. Bo logic cu, thay bang 3nn:
 --   moi vong: npc = DetectNpc(ten)  (workspace.NPCs -> RS.NPCs -> NPCManager)
@@ -19529,7 +19359,6 @@ __DIO_SafeLoop(function()
   end
 end, "L14876")
 
-
 pcall(function()
     local u = game:GetService("ReplicatedStorage"):FindFirstChild("Util")
     u = u and u:FindFirstChild("CameraShaker")
@@ -19538,13 +19367,6 @@ pcall(function()
         if CameraShakerR and CameraShakerR.Stop then CameraShakerR:Stop() end
     end
 end)
-
-
-
-
-
-
-
 
 __DIO_3nn_M1N = 1
 -- [DIO-GRAFT Banana] Da xoa __FA_GetTargets + remote cache cu: M1 moi dung
@@ -19587,9 +19409,6 @@ __DIO_3nn_FruitM1 = function(target)
     end
     return false
 end
-
-
-
 
 -- [DIO-GRAFT Banana] Combat M1 chuan CombatUtil (port AttackAOE/attackMelee):
 -- lay hit part bang getBladeHits cua game (__DSKA_BladeHits da port san), loc rig
@@ -19660,7 +19479,8 @@ __DIO_M1AOE = function(range, includeChars)
     return nil
 end
 __DIO_M1AppendTarget = function(hits, target, range)
- 
+    -- Muc tieu chi dinh nam ngoai Enemies (SeaBeast/Leviathan o SeaBeasts) thi
+    -- getBladeHits khong thay -> chen tay de giu hanh vi danh boss bien nhu cu.
     if not target or not target.Parent then return hits end
     local char = plr.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -19730,7 +19550,6 @@ __DIO_M1Attack = function(range, target)
 end
 -- [M1CORE END]
 
-
 __DIO_3nn_M1 = function(target, range)
     -- [DIO-GRAFT Banana] M1 moi: CombatUtil pipeline (xem khoi M1CORE o tren).
     -- Giu nguyen chu ky (target, range) nen toan bo noi goi cu khong phai sua.
@@ -19766,8 +19585,7 @@ __DIO_3nn_M1 = function(target, range)
     __DIO_M1Attack(tonumber(range) or 65, target)
 end
 
-
--- ================= "Fast Attack Mob" (Banana CombatUtil) =================
+-- "Fast Attack Mob" (Banana CombatUtil)
 -- Toggle "Fast Attack Mob" (Default = false): BAT thi vong Heartbeat danh AOE
 -- quanh nguoi bang CHINH pipeline M1 moi (loc rig/vulnerable, nhip anim that
 -- hoac No Animation tuy toggle). Ban cu ban RegisterHit mu moi frame voi
@@ -19783,7 +19601,6 @@ __DIO_FA_Conn = __SVC_RUN.Heartbeat:Connect(function()
     if not __DIO_FastAttack.Enabled then return end
     pcall(__DIO_3nn_M1, nil, __DIO_FastAttack.Range)
 end)
-
 
 getBeastHunter = function()
     local character = plr.Character
@@ -20259,7 +20076,6 @@ local function __DIO_KeyMiniUI()
     return sg
 end
 
-
 if isKeyValid() then
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", {
@@ -20284,7 +20100,6 @@ else
 
     local __DIO_KeyEntry = ""
     local __KEY_Log = {}
-
 
     local Window, TabKey, TabInfo, TabDiag, KeyInput
     local function KeyEl(tab, method, idx, cfg)
@@ -20341,7 +20156,6 @@ else
         end)
         return true
     end
-
 
     local __okBuild, __errBuild = pcall(function()
         local vp = Vector2.new(1280, 720)
