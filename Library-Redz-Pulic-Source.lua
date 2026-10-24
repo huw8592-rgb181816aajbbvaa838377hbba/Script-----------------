@@ -1043,6 +1043,17 @@ CreateShell = function(Lib, config)
 	end
 
 	local blurEffect
+
+	local function KillStaleBlur()
+
+		for _, obj in ipairs(Lighting:GetChildren()) do
+			if obj:IsA("BlurEffect") and (obj.Name == "AuroraBlur" or obj.Name == "Aurora") then
+				pcall(function() obj:Destroy() end)
+			end
+		end
+	end
+	KillStaleBlur()
+
 	function Window:SetBlur(enabled, size)
 		if enabled then
 			if not blurEffect or not blurEffect.Parent then
@@ -1052,8 +1063,10 @@ CreateShell = function(Lib, config)
 		elseif blurEffect then
 			local effect = blurEffect
 			blurEffect = nil
-			Tw(effect, 0.3, {Size = 0})
-			task.delay(0.35, function() effect:Destroy() end)
+			Tw(effect, 0.2, {Size = 0})
+			task.delay(0.25, function()
+				pcall(function() effect:Destroy() end)
+			end)
 		end
 	end
 
@@ -1096,6 +1109,7 @@ CreateShell = function(Lib, config)
 
 		if self.Minimized then
 			savedSize = Root.Size
+			Window:SetBlur(false)
 			local w = Root.Size.X.Offset
 			Tw(Root, 0.32, {Size = UDim2.fromOffset(w, TOPBAR_H)}, Enum.EasingStyle.Quint)
 			Tw(Resizer, 0.15, {BackgroundTransparency = 1})
@@ -1113,6 +1127,9 @@ CreateShell = function(Lib, config)
 			Content.Visible = true
 			Resizer.Visible = true
 			Tw(Root, 0.34, {Size = savedSize}, Enum.EasingStyle.Quint)
+			if config.Blur == true then
+				Window:SetBlur(true, config.BlurSize or 12)
+			end
 			ctx.RefreshOrb()
 			task.delay(0.34, function() animating = false end)
 		end
@@ -1141,6 +1158,9 @@ CreateShell = function(Lib, config)
 	ctx.UserMoved = function() return userMoved end
 
 	function Window:Destroy()
+		if self._destroyed then return end
+		self._destroyed = true
+
 		for _, c in ipairs(self._extraConnections or {}) do
 			pcall(function() c:Disconnect() end)
 		end
@@ -1152,27 +1172,33 @@ CreateShell = function(Lib, config)
 			orbPulse:Cancel()
 			dotPulse:Cancel()
 		end)
+
+		Window:SetBlur(false)
 		if blurEffect then
 			pcall(function() blurEffect:Destroy() end)
+			blurEffect = nil
 		end
+		KillStaleBlur()
+
+		if TooltipGui then
+			pcall(function() TooltipGui:Destroy() end)
+			TooltipGui = nil
+			TooltipLabel = nil
+		end
+
+		Gui.Enabled = false
+		pcall(function() Gui.Parent = nil end)
 		Gui:Destroy()
+		ctx.Destroyed = true
+
 		local index = table.find(Lib._guis, Gui)
 		if index then table.remove(Lib._guis, index) end
 	end
 
-	local ConfirmDialog
 	function Window:Close()
-		if ConfirmDialog and not ConfirmDialog.Closed then return end
-		ConfirmDialog = ctx:Dialog({
-			Title = "Đóng giao diện?",
-			Content = "Bạn có chắc muốn đóng UI không?",
-			Options = {
-				{ Title = "Đóng", Callback = function() Window:Destroy() end },
-				{ Title = "Hủy" },
-			},
-		})
-		ConfirmDialog.OnClose = function() ConfirmDialog = nil end
+		Window:Destroy()
 	end
+	Window.Remove = Window.Destroy
 
 	CloseBtn.Activated:Connect(function() Window:Close() end)
 	MinBtn.Activated:Connect(function() Window:Minimize() end)
@@ -1188,7 +1214,7 @@ CreateShell = function(Lib, config)
 	Root.BackgroundTransparency = 1
 	Tw(Root, 0.3, {BackgroundTransparency = 0})
 
-	if config.Blur ~= false then
+	if config.Blur == true then
 		Window:SetBlur(true, config.BlurSize or 12)
 	end
 
@@ -1521,6 +1547,45 @@ end
 
 local OptionBuilders = {}
 
+local function AttachCommon(option, card, descFrame)
+	function option:SetVisible(state)
+		state = state ~= false
+		card.Frame.Visible = state
+		if self.Entry then self.Entry.ForceHidden = not state end
+		return self
+	end
+	option.Show = function(self) return self:SetVisible(true) end
+	option.Hide = function(self) return self:SetVisible(false) end
+
+	function option:SetTitle(text)
+		text = tostring(text or "")
+		card.Title.Text = text
+		self.Title = text
+		if self.Entry then
+			self.Entry.Title = text
+			self.Entry.LabelText = text
+			self.Entry.SearchText = Norm(text) .. " " .. Norm(self.Desc or "")
+			if self.Entry.IsSection then end
+		end
+		return self
+	end
+
+	function option:SetDescription(text)
+		text = text or ""
+		self.Desc = text
+		if descFrame then descFrame.Text = text end
+		if self.Entry then
+			self.Entry.Desc = text
+			self.Entry.SearchText = Norm(self.Title or "") .. " " .. Norm(text)
+		end
+		return self
+	end
+	option.SetDesc = option.SetDescription
+	option.SetContent = option.SetDescription
+
+	return option
+end
+
 local function MakeTab(ctx, config)
 	config = config or {}
 	local name = config[1] or config.Name or config.Title or "Tab"
@@ -1831,6 +1896,9 @@ local function MakeTab(ctx, config)
 	tab.AddTextBox = tab.AddInput
 	tab.AddKeybind = function(_, cfg) return OptionBuilders.Keybind(ctx, tab, cfg) end
 	tab.AddParagraph = function(_, cfg, content) return OptionBuilders.Paragraph(ctx, tab, cfg, content) end
+	tab.AddLabel = tab.AddParagraph
+	tab.AddDiscordInvite = function(_, cfg) return OptionBuilders.DiscordInvite(ctx, tab, cfg) end
+	tab.AddDiscord = tab.AddDiscordInvite
 
 	function tab:BumpCount()
 		self.Count = (self.Count or 0) + 1
@@ -2176,7 +2244,7 @@ OptionBuilders.Toggle = function(ctx, tab, cfg)
 
 	option:Set(default == true, true)
 
-	RegisterEntry(ctx, {
+	option.Entry = RegisterEntry(ctx, {
 		Tab = tab,
 		Frame = card.Frame,
 		Title = title,
@@ -2187,6 +2255,7 @@ OptionBuilders.Toggle = function(ctx, tab, cfg)
 		Scale = card.Scale,
 	})
 
+	AttachCommon(option, card, card.Desc)
 	return option
 end
 
@@ -2403,7 +2472,7 @@ OptionBuilders.Slider = function(ctx, tab, cfg)
 
 	option:Set(default, true)
 
-	RegisterEntry(ctx, {
+	option.Entry = RegisterEntry(ctx, {
 		Tab = tab,
 		Frame = card.Frame,
 		Title = title,
@@ -2414,6 +2483,7 @@ OptionBuilders.Slider = function(ctx, tab, cfg)
 		Scale = card.Scale,
 	})
 
+	AttachCommon(option, card, card.Desc)
 	return option
 end
 
@@ -2831,7 +2901,7 @@ OptionBuilders.Dropdown = function(ctx, tab, cfg)
 		paint()
 	end
 
-	RegisterEntry(ctx, {
+	option.Entry = RegisterEntry(ctx, {
 		Tab = tab,
 		Frame = card.Frame,
 		Title = title,
@@ -2842,6 +2912,7 @@ OptionBuilders.Dropdown = function(ctx, tab, cfg)
 		Scale = card.Scale,
 	})
 
+	AttachCommon(option, card, card.Desc)
 	return option
 end
 
@@ -2938,7 +3009,7 @@ OptionBuilders.Button = function(ctx, tab, cfg)
 		fire()
 	end)
 
-	RegisterEntry(ctx, {
+	option.Entry = RegisterEntry(ctx, {
 		Tab = tab,
 		Frame = card.Frame,
 		Title = title,
@@ -2949,6 +3020,7 @@ OptionBuilders.Button = function(ctx, tab, cfg)
 		Scale = card.Scale,
 	})
 
+	AttachCommon(option, card, card.Desc)
 	return option
 end
 
@@ -3060,7 +3132,7 @@ OptionBuilders.Input = function(ctx, tab, cfg)
 
 	if flag then ctx.Window.Flags[flag] = option.Value end
 
-	RegisterEntry(ctx, {
+	option.Entry = RegisterEntry(ctx, {
 		Tab = tab,
 		Frame = card.Frame,
 		Title = title,
@@ -3071,6 +3143,7 @@ OptionBuilders.Input = function(ctx, tab, cfg)
 		Scale = card.Scale,
 	})
 
+	AttachCommon(option, card, card.Desc)
 	return option
 end
 
@@ -3230,7 +3303,7 @@ OptionBuilders.Keybind = function(ctx, tab, cfg)
 
 	if flag then ctx.Window.Flags[flag] = option.Value end
 
-	RegisterEntry(ctx, {
+	option.Entry = RegisterEntry(ctx, {
 		Tab = tab,
 		Frame = card.Frame,
 		Title = title,
@@ -3239,6 +3312,256 @@ OptionBuilders.Keybind = function(ctx, tab, cfg)
 		Label = card.Title,
 		LabelText = title,
 		Scale = card.Scale,
+	})
+
+	AttachCommon(option, card, card.Desc)
+	return option
+end
+
+OptionBuilders.DiscordInvite = function(ctx, tab, cfg)
+	cfg = cfg or {}
+	local title = cfg.Title or cfg.Name or "Discord Server"
+	local invite = cfg.Invite or cfg.Link or ""
+	local banner = cfg.Banner or cfg.BannerColor or C.acc
+	local icon = cfg.Icon or cfg.Image or cfg.Logo
+	local online = cfg.Online or cfg.MembersOnline
+	local members = cfg.Members or cfg.TotalMembers
+	local callback = cfg.Callback
+
+	local cardH = 152
+	local card = New("Frame", {
+		Name = "DiscordInvite",
+		Size = UDim2.new(1, 0, 0, cardH),
+		BackgroundColor3 = C.card,
+		ClipsDescendants = true,
+		LayoutOrder = tab.NextOrder(),
+		Parent = tab.Scroll,
+	})
+	Corner(card, UDim.new(0, 11))
+	local cardStroke = Stroke(card, C.lineSoft, 1, 0.35)
+	Grad(card, 90, C.cardTop, C.card)
+	local cardScale = Scale(card, 1)
+
+	local bannerFrame = New("Frame", {
+		Size = UDim2.new(1, 0, 0, 64),
+		BackgroundColor3 = typeof(banner) == "Color3" and banner or C.acc,
+		BorderSizePixel = 0,
+		Parent = card,
+	})
+	Grad(bannerFrame, 90, (typeof(banner) == "Color3" and banner) or C.acc, C.card, NumberSequence.new({
+		NumberSequenceKeypoint.new(0.0, 0.0),
+		NumberSequenceKeypoint.new(1.0, 0.35),
+	}))
+	if type(banner) == "string" and #banner > 0 then
+		New("ImageLabel", {
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+			Image = banner,
+			ScaleType = Enum.ScaleType.Crop,
+			Parent = bannerFrame,
+		})
+	end
+
+	local iconBox = New("Frame", {
+		Size = UDim2.fromOffset(46, 46),
+		Position = UDim2.new(0, 16, 0, 40),
+		BackgroundColor3 = C.inset,
+		Parent = card,
+	})
+	Corner(iconBox, UDim.new(0, 14))
+	Stroke(iconBox, C.line, 1, 0.2)
+
+	if type(icon) == "string" and string.sub(icon, 1, 13) == "rbxassetid://" then
+		New("ImageLabel", {
+			Size = UDim2.fromScale(0.62, 0.62),
+			Position = UDim2.fromScale(0.5, 0.5),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			Image = icon,
+			ImageColor3 = C.text,
+			Parent = iconBox,
+		})
+	else
+
+		local body = New("Frame", {
+			Size = UDim2.fromOffset(24, 18),
+			Position = UDim2.fromScale(0.5, 0.5),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = C.acc,
+			Parent = iconBox,
+		})
+		Corner(body, UDim.new(0, 8))
+		Library:Accent(body, "BackgroundColor3")
+		local eye1 = Dot(body, 4, C.inset, 0, UDim2.new(0, 7, 0.5, -2))
+		local eye2 = Dot(body, 4, C.inset, 0, UDim2.new(1, -7, 0.5, -2))
+	end
+
+	local titleLabel = New("TextLabel", {
+		Size = UDim2.new(1, -190, 0, 18),
+		Position = UDim2.new(0, 72, 0, 41),
+		BackgroundTransparency = 1,
+		Text = title,
+		TextColor3 = C.text,
+		Font = Font.Bold,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = card,
+	})
+
+	local infoLabel = New("TextLabel", {
+		Size = UDim2.new(1, -190, 0, 14),
+		Position = UDim2.new(0, 72, 0, 61),
+		BackgroundTransparency = 1,
+		Text = "",
+		TextColor3 = C.dim,
+		Font = Font.Regular,
+		TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = card,
+	})
+	if online or members then
+		local parts = {}
+		if online then table.insert(parts, tostring(online) .. " online") end
+		if members then table.insert(parts, tostring(members) .. " members") end
+		infoLabel.Text = table.concat(parts, "  ·  ")
+		local dot = Dot(card, 6, C.acc, 0, UDim2.new(0, 72, 0, 94))
+		Library:Accent(dot, "BackgroundColor3")
+		infoLabel.Position = UDim2.new(0, 84, 0, 87)
+		infoLabel.Size = UDim2.new(1, -200, 0, 14)
+	else
+		infoLabel.Visible = false
+	end
+
+	local linkLabel = New("TextLabel", {
+		Size = UDim2.new(1, -190, 0, 14),
+		Position = UDim2.new(0, 72, 0, (online or members) and 87 or 84),
+		BackgroundTransparency = 1,
+		Text = invite,
+		TextColor3 = C.accLight,
+		Font = Font.Medium,
+		TextSize = 10,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = card,
+	})
+	Library:Accent(linkLabel, "TextColor3", "light")
+
+	local joinBtn = New("TextButton", {
+		Name = "Join",
+		Size = UDim2.fromOffset(104, 34),
+		Position = UDim2.new(1, -16, 0, 46),
+		AnchorPoint = Vector2.new(1, 0),
+		BackgroundColor3 = C.acc,
+		AutoButtonColor = false,
+		Text = "",
+		Parent = card,
+	})
+	Corner(joinBtn, UDim.new(0, 10))
+	Library:Accent(joinBtn, "BackgroundColor3")
+	local joinLabel = New("TextLabel", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Text = "Tham gia",
+		TextColor3 = C.onAcc,
+		Font = Font.Bold,
+		TextSize = 12,
+		Parent = joinBtn,
+	})
+	Library:Accent(joinLabel, "TextColor3", "on")
+
+	local bottomBar = New("Frame", {
+		Size = UDim2.new(1, 0, 0, 40),
+		Position = UDim2.new(0, 0, 1, -40),
+		AnchorPoint = Vector2.new(0, 1),
+		BackgroundColor3 = C.inset,
+		BackgroundTransparency = 0.45,
+		BorderSizePixel = 0,
+		Parent = card,
+	})
+	local hint = New("TextLabel", {
+		Size = UDim2.new(1, -32, 1, 0),
+		Position = UDim2.new(0, 16, 0, 0),
+		BackgroundTransparency = 1,
+		Text = "Bấm để copy link mời",
+		TextColor3 = C.faint,
+		Font = Font.Regular,
+		TextSize = 10,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = bottomBar,
+	})
+
+	local option = { Title = title, Type = "DiscordInvite", Card = card, Invite = invite }
+	local callbacks = {}
+	ctx.OptionObjects = ctx.OptionObjects or {}
+
+	local function fire()
+		if invite and invite ~= "" and typeof(setclipboard) == "function" then
+			pcall(function() setclipboard(invite) end)
+		end
+		if callback then
+			task.spawn(function()
+				local ok, err = pcall(callback, invite)
+				if not ok then warn("[Aurora] Discord callback lỗi: " .. tostring(err)) end
+			end)
+		end
+		for _, fn in ipairs(callbacks) do
+			task.spawn(function()
+				local ok, err = pcall(fn, invite)
+				if not ok then warn("[Aurora] Discord callback lỗi: " .. tostring(err)) end
+			end)
+		end
+	end
+
+	function option:AddCallback(fn)
+		table.insert(callbacks, fn)
+		return self
+	end
+	option.NewCallback = option.AddCallback
+
+	local function press()
+		Tw(joinBtn, 0.12, {BackgroundTransparency = 0.15, Size = UDim2.fromOffset(100, 32)})
+		Tw(joinLabel, 0.12, {Text = "Đã copy!"})
+		task.delay(0.9, function()
+			Tw(joinBtn, 0.2, {BackgroundTransparency = 0, Size = UDim2.fromOffset(104, 34)})
+			Tw(joinLabel, 0.2, {Text = "Tham gia"})
+		end)
+	end
+
+	joinBtn.MouseEnter:Connect(function()
+		Tw(joinBtn, 0.15, {BackgroundTransparency = 0.12})
+	end)
+	joinBtn.MouseLeave:Connect(function()
+		Tw(joinBtn, 0.15, {BackgroundTransparency = 0})
+	end)
+	joinBtn.Activated:Connect(function()
+		press()
+		fire()
+	end)
+	card.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			fire()
+		end
+	end)
+	card.MouseEnter:Connect(function()
+		Tw(card, 0.18, {BackgroundColor3 = C.cardHover})
+		Tw(cardStroke, 0.18, {Color = C.line, Transparency = 0.2})
+		Tw(cardScale, 0.2, {Scale = 1.006})
+	end)
+	card.MouseLeave:Connect(function()
+		Tw(card, 0.18, {BackgroundColor3 = C.card})
+		Tw(cardStroke, 0.18, {Color = C.lineSoft, Transparency = 0.35})
+		Tw(cardScale, 0.2, {Scale = 1})
+	end)
+
+	option.Entry = RegisterEntry(ctx, {
+		Tab = tab,
+		Frame = card,
+		Title = title,
+		Desc = "discord invite link",
+		Kind = "discord",
+		Scale = cardScale,
 	})
 
 	return option
@@ -3977,6 +4300,23 @@ end
 
 function Library:GetWindows()
 	return Library._guis
+end
+
+function Library:Cleanup()
+	for _, gui in ipairs(Library._guis) do
+		pcall(function()
+			gui.Enabled = false
+			gui:Destroy()
+		end)
+	end
+	table.clear(Library._guis)
+	pcall(function()
+		for _, obj in ipairs(Lighting:GetChildren()) do
+			if obj:IsA("BlurEffect") and (obj.Name == "AuroraBlur" or obj.Name == "Aurora") then
+				obj:Destroy()
+			end
+		end
+	end)
 end
 
 return Library
