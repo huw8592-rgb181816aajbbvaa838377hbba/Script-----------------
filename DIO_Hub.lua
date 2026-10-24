@@ -4093,34 +4093,11 @@ _tp = function(target)
         local __okD0, __d0 = pcall(getdis, gg.Position, newdao.Position)
         if (not __okD0) or (__d0 == nil) or __d0 >= 2000 then return end
         if math.abs(newdao.Position.Y - hrp.CFrame.Y) <= 1000 then return end
-        local __t0Sub, __trySub = tick(), 0
-        while __trySub < 16 and (tick() - __t0Sub) < 10 do
-            __trySub = __trySub + 1
-            __DIO_wait(0.5)
-            local __chS2 = plr.Character
-            local __hrpS2 = __chS2 and __chS2:FindFirstChild("HumanoidRootPart")
-            if not __hrpS2 then break end
-            pcall(old_tp, cframenpc)
-            local __okN, __dN = pcall(getdis, cframenpc)
-            if __okN and __dN ~= nil and __dN < 10 then
-                local __netS = ReplicatedStorage:FindFirstChild("Modules")
-                __netS = __netS and __netS:FindFirstChild("Net")
-                local __rfS = __netS and __netS:FindFirstChild("RF/SubmarineWorkerSpeak")
-                if __rfS then
-                    pcall(function() __rfS:InvokeServer("AskKilledTikiBoss") end)
-                    __DIO_wait(0.5)
-                    pcall(function() __rfS:InvokeServer("TravelToSubmergedIsland") end)
-                end
-            end
-            local __okG, __dG = pcall(getdis, gg.Position)
-            if __okG and __dG ~= nil and __dG < 2000 then break end
-        end
-        __DIO_wait(0.6)
-        pcall(function()
-            local __chS3 = plr.Character
-            local __hrpS3 = __chS3 and __chS3:FindFirstChild("HumanoidRootPart")
-            local __bc = __hrpS3 and __hrpS3:FindFirstChild("BodyClip")
-            if __bc then __bc:Destroy() end
+        -- FIX: truoc day nhanh nay old_tp(cframenpc) = teleport THANG sang NPC roi moi goi server.
+        -- Gio: _tp bay den gan NPC tau ngam o Tiki (<= 8 stud) roi moi InvokeServer (xem __DIO_GoSubmergedIsland).
+        if type(__DIO_GoSubmergedIsland) ~= "function" then return end
+        __DIO_GoSubmergedIsland(function()
+            return (type(__DIO_AnyFeatureOn) ~= "function") or __DIO_AnyFeatureOn()
         end)
     end)
     do
@@ -7004,42 +6981,132 @@ Tabs.Main:AddToggle({
         _G.AutoQuest = (Value == true)
     end
 })
--- FIX farm level loop: ham cu kiem tra tam (11520.8, 9829.5) ban kinh 2000,
--- NHUNG tam that cua dao la newdao (10641.09, 9825.07) -> lech ~880 stud, ban kinh lai nho.
--- Cho farm o ria dao bi tinh la "ngoai dao" -> loop farm cu 20s lai keo nguoi choi
--- tween len sea -> bay ve NPC tau ngam o Tiki -> TravelToSubmergedIsland -> tween lai cho farm -> lap lai.
+-- FIX farm level (Submerged Island) v2:
+--  (1) IsInSubmergedIsland: tam that cua dao la newdao (10641, 9825) va dao nam DUOI day bien (Y ~ -1950).
+--      Phai kiem tra ca Y: o tren mat nuoc cung toa do XZ (di thuyen/bay) KHONG duoc tinh la "dang trong dao".
+--  (2) Cong (gate) cu dung quet workspace._WorldOrigin.EnemySpawns, nhung spawn cua dao ngam CHUA load khi dang
+--      o ngoai dao -> luon false -> khong bao gio _tp ve NPC tau ngam o Tiki. Thay bang __DIO_QuestOnSubmerged
+--      (spawn da load / vi tri NPC quest theo ten quest / level >= 2600 khi chua thay spawn nao).
+--  (3) Vong _tp ve NPC cu chi chay 25 lan (~6s) roi bo, chua toi NPC da InvokeServer; RootF bi cu sau khi hoi sinh.
+--      Thay bang __DIO_GoSubmergedIsland: _tp toi khi toi NPC that, InvokeServer, retry, cho vao dao.
 local function IsInSubmergedIsland()
     local char = plr.Character
     if not char then return false end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
     local p = hrp.Position
-    local islandXZ = Vector3.new(newdao.Position.X, 0, newdao.Position.Z)
-    local playerXZ = Vector3.new(p.X, 0, p.Z)
-    local dXZ = (playerXZ - islandXZ).Magnitude
-    if dXZ < 3500 then return true end
-    -- duoi bien sau gan khu vuc dao (dang di chuyen xuong dao) cung coi la "trong dao"
-    if p.Y < -500 and dXZ < 6000 then return true end
-    return false
+    local dXZ = (Vector3.new(p.X, 0, p.Z) - Vector3.new(newdao.Position.X, 0, newdao.Position.Z)).Magnitude
+    return p.Y < -500 and dXZ < 6000
 end
--- Mob quest hien tai co spawn tren/gan dao ngam khong? Chi di tau ngam khi that su can farm o do,
--- tranh tranh chap voi farm quest binh thuong o dao khac.
-local function __DIO_QuestMobOnSubmerged(mobName)
-    if type(mobName) ~= "string" or mobName == "" then return false end
-    local ok, res = pcall(function()
+
+-- Quest hien tai co phai quest o Submerged Island khong?
+__DIO_QuestOnSubmerged = function(questData, level)
+    if not sea3 then return false end
+    local mob = questData and questData[1]
+    if type(mob) ~= "string" or mob == "" then return false end
+    local islandXZ = Vector3.new(newdao.Position.X, 0, newdao.Position.Z)
+    local function nearIsland(pos)
+        return (Vector3.new(pos.X, 0, pos.Z) - islandXZ).Magnitude < 4000
+    end
+    -- 1) spawn cua mob da duoc load va nam tren dao ngam
+    local near, any = false, false
+    pcall(function()
         local sp = workspace:FindFirstChild("_WorldOrigin")
         sp = sp and sp:FindFirstChild("EnemySpawns")
-        if not sp then return false end
-        local islandXZ = Vector3.new(newdao.Position.X, 0, newdao.Position.Z)
+        if not sp then return end
         for _, s in ipairs(sp:GetChildren()) do
-            if s:IsA("BasePart") and string.find(s.Name, mobName, 1, true) then
-                local p = Vector3.new(s.CFrame.Position.X, 0, s.CFrame.Position.Z)
-                if (p - islandXZ).Magnitude < 4000 then return true end
+            if s:IsA("BasePart") and string.find(s.Name, mob, 1, true) then
+                any = true
+                if nearIsland(s.Position) then
+                    near = true
+                    return
+                end
+            end
+        end
+    end)
+    if near then return true end
+    -- 2) vi tri NPC giao quest (lay tu GuideModule.NPCList, khong can NPC dang duoc load)
+    if type(__DIO_3nn_QuestPointFor) == "function" and type(questData[3]) == "string" then
+        local ok, cf = pcall(__DIO_3nn_QuestPointFor, questData[3])
+        if ok and typeof(cf) == "CFrame" then
+            return nearIsland(cf.Position)
+        end
+    end
+    -- 3) thay spawn cua mob o dao khac -> khong phai Submerged
+    if any then return false end
+    -- 4) khong thay spawn nao (dao ngam chi load sau khi vao) -> level >= 2600 thi la Submerged
+    return (tonumber(level) or 0) >= 2600
+end
+
+-- Bay (_tp) den GAN NPC tau ngam o Tiki (<= 8 stud, KHONG teleport thang) -> InvokeServer("TravelToSubmergedIsland")
+-- -> cho IsInSubmergedIsland(). alive(): ham tra ve true khi con muon tiep tuc (mac dinh: _G.Level).
+__DIO_SubTravelBusy = 0
+__DIO_GoSubmergedIsland = function(alive)
+    alive = alive or function() return _G.Level end
+    -- chong chay long nhau (farm level + _tp cung goi); tu het han sau 200s neu thread bi kill giua chung
+    if tick() - (__DIO_SubTravelBusy or 0) < 200 then return false end
+    __DIO_SubTravelBusy = tick()
+    local okRun, res = pcall(function()
+        local function getHrp()
+            local c = plr.Character
+            return c and c:FindFirstChild("HumanoidRootPart")
+        end
+        local function getRF()
+            local m = __SVC_RS:FindFirstChild("Modules")
+            m = m and m:FindFirstChild("Net")
+            return m and m:FindFirstChild("RF/SubmarineWorkerSpeak")
+        end
+        for attempt = 1, 4 do
+            if not alive() then return false end
+            if IsInSubmergedIsland() then return true end
+
+            -- (1) bay den gan NPC (tween), thoi gian toi da theo khoang cach hien tai
+            local h0 = getHrp()
+            local d0 = h0 and (h0.Position - cframenpc.Position).Magnitude or 20000
+            local limit = math.clamp(d0 / 250 + 15, 20, 120)
+            local t0, arrived = tick(), false
+            while alive() and tick() - t0 < limit do
+                local h = getHrp()
+                if h then
+                    if (h.Position - cframenpc.Position).Magnitude <= 8 then
+                        arrived = true
+                        break
+                    end
+                    _tp(cframenpc)
+                end
+                __DIO_wait(Sec)
+            end
+            if not alive() then return false end
+
+            -- (2) CHI goi server khi da den gan NPC. Chua den -> thu lai vong bay (khong teleport thang).
+            if arrived then
+                pcall(function() if type(StopTween) == "function" then StopTween(false) end end)
+                __DIO_wait(0.5)
+                local rf = getRF()
+                if rf then
+                    local ok1, r1 = pcall(function() return rf:InvokeServer("AskKilledTikiBoss") end)
+                    __DIO_wait(0.5)
+                    local ok2, r2 = pcall(function() return rf:InvokeServer("TravelToSubmergedIsland") end)
+                    warn("[DIO] Submerged travel #" .. attempt, ok1, tostring(r1), ok2, tostring(r2))
+                else
+                    warn("[DIO] Khong tim thay RF/SubmarineWorkerSpeak")
+                end
+                -- (3) cho vao dao
+                local t1 = tick()
+                while alive() and tick() - t1 < 15 do
+                    __DIO_wait(0.5)
+                    if IsInSubmergedIsland() then break end
+                end
+                if IsInSubmergedIsland() then
+                    pcall(function() __DIO_TweenKill(false, true) end)
+                    return true
+                end
             end
         end
         return false
     end)
-    return (ok and res) or false
+    __DIO_SubTravelBusy = 0
+    return okRun and res or false
 end
 local function __DIO_NearestMob(enemyName, rootPos)
     local en = workspace:FindFirstChild("Enemies")
@@ -7075,36 +7142,16 @@ __DIO_SafeLoop(function()
                 end
                 local hasQuest = (questText ~= "")
                 local questData = QuestNeta()
-                -- FIX: chi ep di Submerged Island khi mob quest dung la mob cua dao ngam.
-                -- Truoc day: level >= 2600 + IsInSubmergedIsland() sai tam -> dang farm binh thuong
-                -- cung bi tween len sea, bay ve NPC tau ngam (Tiki), travel, roi tween ve lai cho farm, cu lap mai.
-                if level >= 2600 and not inSub
+                -- FIX: quest o Submerged Island ma chua o trong dao -> _tp ve NPC tau ngam o Tiki,
+                -- InvokeServer("TravelToSubmergedIsland") de sang dao (khong phu thuoc spawn da load hay chua).
+                if not inSub
                    and questData and questData[1]
-                   and __DIO_QuestMobOnSubmerged(questData[1]) then
-                    if not alreadyTeleported or tick() - __DIO_LvlTryT > 20 then
+                   and __DIO_QuestOnSubmerged(questData, level) then
+                    if not alreadyTeleported or tick() - __DIO_LvlTryT > 8 then
                         alreadyTeleported = true
                         __DIO_LvlTryT = tick()
-                        local npcPos = CFrame.new(-16269.7041, 25.2288494, 1373.65955)
-                        local attempts = 0
-                        repeat
-                            __DIO_wait(Sec)
-                            _tp(npcPos)
-                            attempts = attempts + 1
-                        until not _G.Level
-                           or (RootF.Position - npcPos.Position).Magnitude <= 8
-                           or attempts > 25
-                        if _G.Level then
-                            __DIO_wait(1)
-                            pcall(function()
-                                local sm = __SVC_RS.Modules.Net:FindFirstChild("RF/SubmarineWorkerSpeak")
-                                if sm then sm:InvokeServer("TravelToSubmergedIsland") end
-                            end)
-                            local t0 = tick()
-                            repeat
-                                __DIO_wait(0.5)
-                                if IsInSubmergedIsland() then break end
-                            until not _G.Level or tick() - t0 > 15
-                        end
+                        __DIO_GoSubmergedIsland()
+                        __DIO_LvlTryT = tick()
                     end
                     return
                 end
