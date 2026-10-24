@@ -960,9 +960,29 @@ CreateShell = function(Lib, config)
 		ZIndex = 201,
 		Parent = Orb,
 	})
+
+	local OrbClose = New("TextButton", {
+		Name = "OrbClose",
+		Size = UDim2.fromOffset(24, 24),
+		Position = UDim2.new(1, -2, 0, 2),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = C.bg,
+		BackgroundTransparency = 0.1,
+		AutoButtonColor = false,
+		Text = "",
+		Visible = false,
+		ZIndex = 205,
+		Parent = Orb,
+	})
+	Corner(OrbClose, UDim.new(1, 0))
+	Stroke(OrbClose, C.danger, 1.4, 0.25)
+	local orbCloseA = Bar(OrbClose, 9, 1.8, 45, C.danger, 0, UDim2.fromScale(0.5, 0.5), Vector2.new(0.5, 0.5))
+	local orbCloseB = Bar(OrbClose, 9, 1.8, -45, C.danger, 0, UDim2.fromScale(0.5, 0.5), Vector2.new(0.5, 0.5))
+
 	ctx.Orb = Orb
 	ctx.OrbGlow = OrbGlow
 	ctx.OrbLines = orbLines
+	ctx.OrbClose = OrbClose
 
 	local orbPulse = TweenService:Create(OrbGlow, TweenInfo.new(1.9, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {BackgroundTransparency = 0.96})
 	orbPulse:Play()
@@ -1086,8 +1106,12 @@ CreateShell = function(Lib, config)
 	end
 	ctx.SetOrbVisible = SetOrbVisible
 	ctx.RefreshOrb = function()
-		local visible = Window.Minimized or ctx.OrbAlways == true or IsMobile()
+		if ctx.Destroyed then return end
+		local visible = Window.Minimized == true or ctx.OrbAlways == true
 		SetOrbVisible(visible)
+		if OrbClose then
+			OrbClose.Visible = visible and Window.Minimized == true
+		end
 	end
 
 	local restoreIcon = function(minimized)
@@ -1103,30 +1127,37 @@ CreateShell = function(Lib, config)
 	end
 
 	function Window:Minimize()
-		if animating then return end
+		if animating or ctx.Destroyed then return end
 		animating = true
 		self.Minimized = not self.Minimized
 
 		if self.Minimized then
+
 			savedSize = Root.Size
 			Window:SetBlur(false)
 			local w = Root.Size.X.Offset
-			Tw(Root, 0.32, {Size = UDim2.fromOffset(w, TOPBAR_H)}, Enum.EasingStyle.Quint)
-			Tw(Resizer, 0.15, {BackgroundTransparency = 1})
+			if ctx.OpenDropdown then pcall(function() ctx.OpenDropdown() end) end
+			Tw(Root, 0.24, {Size = UDim2.fromOffset(w, TOPBAR_H)}, Enum.EasingStyle.Quint)
 			task.delay(0.16, function()
 				Side.Visible = false
 				Content.Visible = false
 				Resizer.Visible = false
 			end)
-			task.delay(0.3, function()
+			task.delay(0.26, function()
+				if ctx.Destroyed then return end
+				Root.Visible = false
 				animating = false
 				ctx.RefreshOrb()
 			end)
 		else
+			Root.Visible = true
 			Side.Visible = true
 			Content.Visible = true
 			Resizer.Visible = true
+			Root.Size = UDim2.fromOffset(Root.Size.X.Offset, TOPBAR_H)
 			Tw(Root, 0.34, {Size = savedSize}, Enum.EasingStyle.Quint)
+			Resizer.BackgroundTransparency = 1
+			Tw(Resizer, 0.3, {BackgroundTransparency = 0.9})
 			if config.Blur == true then
 				Window:SetBlur(true, config.BlurSize or 12)
 			end
@@ -1139,6 +1170,10 @@ CreateShell = function(Lib, config)
 	OrbHit.Activated:Connect(function()
 		if orbWasDragged and orbWasDragged() then return end
 		Window:Minimize()
+	end)
+
+	OrbClose.Activated:Connect(function()
+		Window:Destroy()
 	end)
 
 	local DragArea = New("Frame", {
@@ -1186,6 +1221,14 @@ CreateShell = function(Lib, config)
 			TooltipLabel = nil
 		end
 
+		pcall(function()
+			if ctx.Orb then ctx.Orb.Visible = false end
+			if ctx.OrbGlow then ctx.OrbGlow.Visible = false end
+			if ctx.OrbClose then ctx.OrbClose.Visible = false end
+			if Root then Root.Visible = false end
+		end)
+		ctx.OrbAlways = false
+
 		Gui.Enabled = false
 		pcall(function() Gui.Parent = nil end)
 		Gui:Destroy()
@@ -1199,6 +1242,12 @@ CreateShell = function(Lib, config)
 		Window:Destroy()
 	end
 	Window.Remove = Window.Destroy
+	function Window:CloseNoConfirm()
+		Window:Destroy()
+	end
+	function Window:IsDestroyed()
+		return self._destroyed == true or ctx.Destroyed == true
+	end
 
 	CloseBtn.Activated:Connect(function() Window:Close() end)
 	MinBtn.Activated:Connect(function() Window:Minimize() end)
@@ -1546,6 +1595,15 @@ local function NewCard(tab, cfg)
 end
 
 local OptionBuilders = {}
+
+Library.RowClick = false
+function Library:SetRowClick(state)
+	Library.RowClick = state and true or false
+end
+local function RowClickAllowed(ctx)
+	if ctx and ctx.RowClick ~= nil then return ctx.RowClick end
+	return Library.RowClick
+end
 
 local function AttachCommon(option, card, descFrame)
 	function option:SetVisible(state)
@@ -2112,7 +2170,7 @@ OptionBuilders.Toggle = function(ctx, tab, cfg)
 
 	local switch = New("Frame", {
 		Name = "Switch",
-		Size = UDim2.fromOffset(44, 24),
+		Size = UDim2.fromOffset(48, 26),
 		Position = UDim2.new(1, -16, 0.5, 0),
 		AnchorPoint = Vector2.new(1, 0.5),
 		BackgroundColor3 = C.lineSoft,
@@ -2143,10 +2201,14 @@ OptionBuilders.Toggle = function(ctx, tab, cfg)
 	Library:Accent(knobGlow, "BackgroundColor3")
 
 	local hit = New("TextButton", {
-		Size = UDim2.fromScale(1, 1),
+		Name = "SwitchHit",
+		Size = UDim2.fromOffset(64, 46),
+		Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0.5),
 		BackgroundTransparency = 1,
 		Text = "",
 		AutoButtonColor = false,
+		ZIndex = 5,
 		Parent = switch,
 	})
 
@@ -2199,7 +2261,7 @@ OptionBuilders.Toggle = function(ctx, tab, cfg)
 			Transparency = value and 0.5 or 0.4,
 		})
 		Tw(knob, 0.28, {
-			Position = UDim2.new(0, value and 23 or 3, 0.5, 0),
+			Position = UDim2.new(0, value and 25 or 3, 0.5, 0),
 			BackgroundColor3 = value and C.onAcc or C.dim,
 		}, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 		Tw(knobGlow, 0.25, {BackgroundTransparency = value and 0.55 or 1})
@@ -2236,11 +2298,14 @@ OptionBuilders.Toggle = function(ctx, tab, cfg)
 		option:Toggle()
 	end
 	hit.Activated:Connect(hitToggle)
-	card.Frame.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			hitToggle()
-		end
-	end)
+
+	if RowClickAllowed(ctx) then
+		card.Frame.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				hitToggle()
+			end
+		end)
+	end
 
 	option:Set(default == true, true)
 
@@ -2445,29 +2510,64 @@ OptionBuilders.Slider = function(ctx, tab, cfg)
 		option:Set(min + (max - min) * alpha)
 	end
 
+	local dragStart, dragActive, dragAxis = nil, false, nil
+	local DRAG_THRESHOLD = 8
+
+	local function beginVisual()
+		Tw(thumb, 0.15, {Size = UDim2.fromOffset(18, 18)}, Enum.EasingStyle.Back)
+		Tw(thumbGlow, 0.15, {BackgroundTransparency = 0.55})
+	end
+	local function endVisual()
+		Tw(thumb, 0.2, {Size = UDim2.fromOffset(14, 14)}, Enum.EasingStyle.Back)
+		Tw(thumbGlow, 0.2, {BackgroundTransparency = 0.75})
+	end
+
 	trackArea.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-			Tw(thumb, 0.15, {Size = UDim2.fromOffset(18, 18)}, Enum.EasingStyle.Back)
-			Tw(thumbGlow, 0.15, {BackgroundTransparency = 0.55})
-			setFromX(input.Position.X)
+			if IsMobile() then
+
+				dragStart = input.Position
+				dragActive = false
+				dragAxis = nil
+			else
+				dragging = true
+				beginVisual()
+				setFromX(input.Position.X)
+			end
 		end
 	end)
 
 	ctx:Conn(UserInputService.InputChanged, function(input)
-		if not dragging then return end
-		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+		if dragging then
 			setFromX(input.Position.X)
+			return
 		end
+		if not dragStart then return end
+		local dx = input.Position.X - dragStart.X
+		local dy = input.Position.Y - dragStart.Y
+		if not dragAxis and (math.abs(dx) > DRAG_THRESHOLD or math.abs(dy) > DRAG_THRESHOLD) then
+			dragAxis = (math.abs(dx) >= math.abs(dy)) and "x" or "y"
+			if dragAxis == "x" then
+				dragging = true
+				dragActive = true
+				beginVisual()
+				setFromX(input.Position.X)
+			end
+		end
+		if dragging then setFromX(input.Position.X) end
 	end)
 
 	ctx:Conn(UserInputService.InputEnded, function(input)
-		if not dragging then return end
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+		if dragging then
 			dragging = false
-			Tw(thumb, 0.2, {Size = UDim2.fromOffset(14, 14)}, Enum.EasingStyle.Back)
-			Tw(thumbGlow, 0.2, {BackgroundTransparency = 0.75})
+			endVisual()
+		elseif dragStart and not dragActive and IsMobile() then
+
+			setFromX(input.Position.X)
 		end
+		dragStart, dragActive, dragAxis = nil, false, nil
 	end)
 
 	option:Set(default, true)
@@ -2529,7 +2629,7 @@ OptionBuilders.Dropdown = function(ctx, tab, cfg)
 
 	local pill = New("Frame", {
 		Name = "Pill",
-		Size = UDim2.fromOffset(150, 30),
+		Size = UDim2.fromOffset(150, 34),
 		Position = UDim2.new(1, -16, 0, baseH / 2),
 		AnchorPoint = Vector2.new(1, 0.5),
 		BackgroundColor3 = C.inset,
@@ -2558,10 +2658,14 @@ OptionBuilders.Dropdown = function(ctx, tab, cfg)
 	chevB.Position = UDim2.new(1, -14, 0.5, -2.2)
 
 	local pillHit = New("TextButton", {
-		Size = UDim2.fromScale(1, 1),
+		Name = "PillHit",
+		Size = UDim2.fromOffset(178, 48),
+		Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0.5),
 		BackgroundTransparency = 1,
 		Text = "",
 		AutoButtonColor = false,
+		ZIndex = 5,
 		Parent = pill,
 	})
 
@@ -2822,13 +2926,16 @@ OptionBuilders.Dropdown = function(ctx, tab, cfg)
 		option._lock = tick()
 		if option.Opened then closeSelf() else open() end
 	end)
-	card.Frame.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			if tick() - (option._lock or -1e9) < 0.12 then return end
-			option._lock = tick()
-			if option.Opened then closeSelf() else open() end
-		end
-	end)
+
+	if RowClickAllowed(ctx) then
+		card.Frame.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				if tick() - (option._lock or -1e9) < 0.12 then return end
+				option._lock = tick()
+				if option.Opened then closeSelf() else open() end
+			end
+		end)
+	end
 
 	ctx:Conn(UserInputService.InputBegan, function(input)
 		if not option.Opened then return end
@@ -3193,10 +3300,14 @@ OptionBuilders.Keybind = function(ctx, tab, cfg)
 	})
 
 	local pillHit = New("TextButton", {
-		Size = UDim2.fromScale(1, 1),
+		Name = "KeyHit",
+		Size = UDim2.fromOffset(150, 48),
+		Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0.5),
 		BackgroundTransparency = 1,
 		Text = "",
 		AutoButtonColor = false,
+		ZIndex = 5,
 		Parent = pill,
 	})
 
@@ -3539,11 +3650,14 @@ OptionBuilders.DiscordInvite = function(ctx, tab, cfg)
 		press()
 		fire()
 	end)
-	card.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			fire()
-		end
-	end)
+
+	if RowClickAllowed(ctx) then
+		card.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				fire()
+			end
+		end)
+	end
 	card.MouseEnter:Connect(function()
 		Tw(card, 0.18, {BackgroundColor3 = C.cardHover})
 		Tw(cardStroke, 0.18, {Color = C.line, Transparency = 0.2})
@@ -4045,6 +4159,7 @@ local function NewMinimizer(ctx, cfg)
 		if processed then return end
 		if UserInputService:GetFocusedTextBox() then return end
 		if input.KeyCode ~= Enum.KeyCode.Unknown and input.KeyCode == self.KeyCode then
+			if ctx.Destroyed then return end
 			ctx.Window:Minimize()
 		end
 	end)
@@ -4061,7 +4176,7 @@ function Minimizer:CreateMobileMinimizer(cfg)
 	cfg = cfg or {}
 	local ctx = self._ctx
 
-	ctx.OrbAlways = cfg.AlwaysVisible ~= false
+	ctx.OrbAlways = cfg.AlwaysVisible == true
 
 	if type(cfg.Image) == "string" and #cfg.Image > 0 then
 		if not ctx.OrbImage then
@@ -4125,10 +4240,10 @@ end
 
 function Minimizer:Destroy()
 	local ctx = self._ctx
-	if ctx.Orb then
-		ctx.Orb.Visible = false
-		ctx.OrbGlow.Visible = false
-	end
+	ctx.OrbAlways = false
+	if ctx.Orb then ctx.Orb.Visible = false end
+	if ctx.OrbGlow then ctx.OrbGlow.Visible = false end
+	if ctx.OrbClose then ctx.OrbClose.Visible = false end
 end
 
 function Library:MakeWindow(config)
