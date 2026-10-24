@@ -1683,13 +1683,70 @@ __DIO_MobPct = function(model)
   if mx <= 0 then return 0 end
   return ((hum.Health or 0) / mx) * 100
 end
+-- FIX mastery theo NHOM mob: khi bring co tu 2 mob tro len, khong chi xet 1 con muc tieu ma xet ca vung
+-- (cac mob cung ten, con song, nam trong ban kinh _G.MasteryGroupRadius quanh mob muc tieu).
+-- Chi chuyen sang Gun/Fruit khi % mau CAO NHAT trong nhom <= slider "Health Farm Mastery".
+-- Vi du slider 41%: con nao trong nhom con tren 41% thi van danh melee/vu khi thuong tiep.
+_G.MasteryGroupRadius = _G.MasteryGroupRadius or 35
+_G.MasteryGroupWait   = _G.MasteryGroupWait   or 4
+__DIO_MasteryGroupCache = { model = nil, t = 0, maxPct = nil, n = 0 }
+__DIO_MasteryReadyT = setmetatable({}, { __mode = "k" })
+__DIO_MasteryGroupPct = function(model)
+  local selfPct = __DIO_MobPct(model)
+  if selfPct == nil then return nil, 0 end
+  local now = tick()
+  local c = __DIO_MasteryGroupCache
+  if c.model == model and (now - c.t) < 0.1 and c.maxPct ~= nil then return c.maxPct, c.n end
+  local maxPct, n = selfPct, 1
+  pcall(function()
+    local root = model:FindFirstChild("HumanoidRootPart")
+    local en = workspace:FindFirstChild("Enemies")
+    if not root or not en then return end
+    local radius = math.clamp(tonumber(_G.MasteryGroupRadius) or 35, 5, 200)
+    for _, m in ipairs(en:GetChildren()) do
+      if m ~= model and m.Name == model.Name and not m:FindFirstChild("Ignored") then
+        local hum = m:FindFirstChildOfClass("Humanoid")
+        local r = m:FindFirstChild("HumanoidRootPart")
+        if hum and r and hum.Health > 0 and hum.MaxHealth > 0
+           and (r.Position - root.Position).Magnitude <= radius
+           and not (type(__DIO_IsGhost) == "function" and __DIO_IsGhost(m)) then
+          n = n + 1
+          local p = (hum.Health / hum.MaxHealth) * 100
+          if p > maxPct then maxPct = p end
+        end
+      end
+    end
+  end)
+  c.model, c.t, c.maxPct, c.n = model, now, maxPct, n
+  return maxPct, n
+end
 __DIO_UseMasteryNow = function(model)
   local kind
   pcall(function() kind = __DIO_MasteryKind() end)
   if not kind then return false, nil end
   local pct = __DIO_MobPct(model)
   if pct == nil then return true, kind end
-  return (pct <= __DIO_MasteryPct()), kind
+  local limit = __DIO_MasteryPct()
+  -- 1) con muc tieu chua xuong toi slider -> chua dung skill
+  if pct > limit then
+    __DIO_MasteryReadyT[model] = nil
+    return false, kind
+  end
+  -- 2) con muc tieu da du: kiem tra ca nhom ben duoi
+  local okG, groupPct = pcall(__DIO_MasteryGroupPct, model)
+  if not okG or groupPct == nil or groupPct <= limit then
+    __DIO_MasteryReadyT[model] = nil
+    return true, kind
+  end
+  -- 3) nhom chua du mau: tiep tuc danh thuong. Chong ket: neu cho qua _G.MasteryGroupWait giay
+  -- (mob lech xa / khong bi trung don) thi cho dung skill luon.
+  local t0 = __DIO_MasteryReadyT[model]
+  if not t0 then
+    __DIO_MasteryReadyT[model] = tick()
+    return false, kind
+  end
+  if (tick() - t0) >= (tonumber(_G.MasteryGroupWait) or 4) then return true, kind end
+  return false, kind
 end
 __DIO_EquipFarmWeapon = function(model)
   if _G.AutoAttackDungeon or _G.AutoRaid or _G.AutoMultiRaid or _G.AutoBuyChipAttackLaw then
@@ -9085,6 +9142,47 @@ function __DIO_MasteryPace(flag, mob, base)
         __DIO_wait(0.2)
     end
 end
+-- FIX ROI khi skill dang hoi / chua thay mob (Farm Level / Cake / Bone / Tyrant / Nearest):
+-- Engine tween chi giu nguoi choi ~0.3s sau lenh _tp cuoi. Vong mastery thi cho skill hoi
+-- (__DIO_MasteryPace cho toi 2s) hoac khong co mob nao (khong goi _tp) -> mover bi huy, nhan vat roi.
+-- Giu bang 1 BodyVelocity chi khoa truc Y (ten rieng "DIO_MasteryHold" nen engine khong xoa),
+-- chi ton tai luc dang bat Auto Mastery; tat toggle / ngoi thuyen / dang ne don -> go ngay.
+__DIO_MasteryHold = __DIO_MasteryHold or { bv = nil }
+__DIO_MasteryHoldWanted = function()
+    if _G.FarmMastery_Dev ~= true and _G.FarmMastery_G ~= true and _G.FarmMastery_S ~= true then return false end
+    if __DIO_Dodging == true or __DIO_FlyBusy == true then return false end
+    return true
+end
+__DIO_MasteryHoldRelease = function()
+    local bv = __DIO_MasteryHold.bv
+    __DIO_MasteryHold.bv = nil
+    if bv then pcall(function() bv:Destroy() end) end
+end
+pcall(function() if __DIO_MasteryHoldConn then __DIO_MasteryHoldConn:Disconnect() end end)
+__DIO_MasteryHoldConn = RunService.Heartbeat:Connect(function()
+    pcall(function()
+        local ch = plr.Character
+        local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+        local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+        local want = (hrp ~= nil) and (hum ~= nil) and hum.Health > 0 and not hum.Sit
+            and __DIO_MasteryHoldWanted()
+        if not want then
+            if __DIO_MasteryHold.bv then __DIO_MasteryHoldRelease() end
+            return
+        end
+        local bv = __DIO_MasteryHold.bv
+        if bv and bv.Parent == hrp then return end
+        if bv then __DIO_MasteryHoldRelease() end
+        local old = hrp:FindFirstChild("DIO_MasteryHold")
+        if old then old:Destroy() end
+        bv = Instance.new("BodyVelocity")
+        bv.Name = "DIO_MasteryHold"
+        bv.MaxForce = Vector3.new(0, math.huge, 0)
+        bv.Velocity = Vector3.new(0, 0, 0)
+        bv.Parent = hrp
+        __DIO_MasteryHold.bv = bv
+    end)
+end)
 function __DIO_MasteryScan(names, maxDist)
     local en = workspace:FindFirstChild("Enemies")
     local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
