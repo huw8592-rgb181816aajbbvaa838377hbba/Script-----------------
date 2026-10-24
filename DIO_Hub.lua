@@ -5987,8 +5987,18 @@ do
             function tab:AddToggle(Setting)
                 local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title))
                 local saved = GetSetting(key, nil)
+                -- FIX cung lop loi voi AddSlider: saved khong phai boolean (vd so do slider trung ten
+                -- ghi de) ma gan vao Default se bi lib UI quang loi lam sap boot. Bo qua + tu xoa.
+                if saved ~= nil and type(saved) ~= "boolean" then
+                    _G.SaveData[key] = nil
+                    pcall(SaveSettings)
+                    saved = nil
+                end
                 if _G.DIO_AutoRestore == true and Setting and saved ~= nil then
                     Setting.Default = saved
+                end
+                if Setting and Setting.Default ~= nil and type(Setting.Default) ~= "boolean" then
+                    Setting.Default = (Setting.Default == true)
                 end
                 local origCb = Setting and Setting.Callback
                 local __userTouched = false
@@ -6166,6 +6176,13 @@ do
             function tab:AddDropdown(Setting)
                 local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title))
                 local saved = GetSetting(key, nil)
+                -- FIX cung lop loi voi AddSlider/AddToggle: Dropdown chi nhan Default dang string/table,
+                -- saved sai kieu (boolean/number) thi bo qua + tu xoa khoi SaveData, tranh sap boot.
+                if saved ~= nil and type(saved) ~= "string" and type(saved) ~= "table" then
+                    _G.SaveData[key] = nil
+                    pcall(SaveSettings)
+                    saved = nil
+                end
                 local __savedCb = saved
                 if Setting and saved ~= nil then
                     if Setting.MultiSelect and type(saved) == "table" then
@@ -6232,13 +6249,31 @@ do
             function tab:AddSlider(Setting)
                 local key = __DIOKey(tabName, Setting and (Setting.Name or Setting.Title))
                 local saved = GetSetting(key, nil)
-                if Setting and saved ~= nil then
-                    Setting.Default = saved
+                -- FIX crash "Tab.AddSlider.Default". 'number', or 'nil' expected, got boolean (dong 6249 cu):
+                -- key "UI/SeaEvent/Ship Speed" tung bi Toggle trung ten ghi boolean vao cung 1 key,
+                -- saved = true/false -> gan thang vao Setting.Default thi lib UI quang loi o _AddSlider
+                -- lam sap toan bo script ngay luc boot (DIO BOOT: FAILED). Gio chi chap nhan saved dang
+                -- so (hoac chuoi so); sai kieu thi bo qua + xoa khoi SaveData de cac lan boot sau tu het.
+                saved = tonumber(saved)
+                if saved == nil and _G.SaveData[key] ~= nil then
+                    _G.SaveData[key] = nil
+                    pcall(SaveSettings)
+                end
+                if Setting then
+                    if saved ~= nil then
+                        Setting.Default = saved
+                    elseif type(Setting.Default) ~= "number" then
+                        Setting.Default = tonumber(Setting.Default) or tonumber(Setting.Min) or 0
+                    end
+                    if type(Setting.Min) == "number" and Setting.Default < Setting.Min then Setting.Default = Setting.Min end
+                    if type(Setting.Max) == "number" and Setting.Default > Setting.Max then Setting.Default = Setting.Max end
                 end
                 local origCb = Setting and Setting.Callback
                 local __userTouched = false
                 if Setting and origCb then
                     Setting.Callback = function(Value)
+                        Value = tonumber(Value)
+                        if Value == nil then return end
                         __userTouched = true
                         if _G.SaveData[key] ~= Value then
                             SetSetting(key, Value)
@@ -14438,8 +14473,12 @@ Default = true,
 Callback = function()
   replicated.Remotes.CommF_:InvokeServer("BuyBoat",(_G.SelectedBoat or "Guardian"))
 end})
+-- FIX: truoc day Toggle nay cung ten "Ship Speed" voi Slider ngay ben duoi -> trung key luu
+-- "UI/SeaEvent/Ship Speed": Toggle luu boolean, Slider doc boolean do lam Default -> crash.
+-- Doi Toggle ve dung ten "Ship Speed Modifier" (khop __DIO_ToggleFlagMap["UI/SeaEvent/Ship Speed Modifier"]),
+-- Slider giu ten "Ship Speed" (Default = 300). Hai key tach biet -> khong ghi de len nhau nua.
 Tabs.SeaEvent:AddToggle({
-    Name = __DIO_T["Ship Speed"],
+    Name = __DIO_T["Ship Speed Modifier"],
     Default = false,
     Callback = function(Value)
         getgenv().SpeedBoat = Value
