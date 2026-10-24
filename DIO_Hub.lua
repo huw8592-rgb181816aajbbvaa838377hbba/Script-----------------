@@ -1396,7 +1396,7 @@ pcall(function()
 end)
 _G.SaveData = _G.SaveData or {}
 _G.DIO_AutoSave = (getgenv().SaveSettings ~= false)
-_G.DIO_AutoRestore = (getgenv().AutoRestoreToggles == true)
+_G.DIO_AutoRestore = (_G.DIO_AutoSave ~= false) and (getgenv().AutoRestoreToggles ~= false)
 
 if getgenv().DIO_ResetStaleFlags ~= false then
     pcall(function()
@@ -5119,16 +5119,16 @@ local Tabs = {
     Info = Window:MakeTab({ Title = "Info Discord", Icon = "" }),
     Status = Window:MakeTab({ Title = "Status Server", Icon = "" }),
     Shop = Window:MakeTab({ Title = "Shop", Icon = "" }),
-    Travel = Window:MakeTab({ Title = "Teleport Island", Icon = "" }),
+    Travel = Window:MakeTab({ Title = "Local Island", Icon = "" }),
     Settings = Window:MakeTab({ Title = "Setting", Icon = "" }),
     Main = Window:MakeTab({ Title = "Farming", Icon = "" }),
     Quests = Window:MakeTab({ Title = "Other And Item", Icon = "" }),
     SeaEvent = Window:MakeTab({ Title = "Sea Event", Icon = "" }),
-    Race = Window:MakeTab({ Title = "Mirage And Race", Icon = "" }),
-    Prehistoric = Window:MakeTab({ Title = "Prehistoric Event", Icon = "" }),
-    Fish = Window:MakeTab({ Title = "Fishing", Icon = "" }),
-    Esp = Window:MakeTab({ Title = "Stats And Esp", Icon = "" }),
+    Race = Window:MakeTab({ Title = "Update Race", Icon = "" }),
+    Prehistoric = Window:MakeTab({ Title = "Dojo and Draco", Icon = "" }),
     Raids = Window:MakeTab({ Title = "Fruit And Raid", Icon = "" }),
+    Esp = Window:MakeTab({ Title = "Stats And Esp", Icon = "" }),
+    Fish = Window:MakeTab({ Title = "Fishing", Icon = "" }),
     Combat = Window:MakeTab({ Title = "PvP", Icon = "" }),
     Webhook = Window:MakeTab({ Title = "Webhook Notify", Icon = "" }),
     Misc = Window:MakeTab({ Title = "Misc", Icon = "" })
@@ -6948,15 +6948,30 @@ function __DIO_ApplyFarmMode()
     shouldTween = true
 end
 
+function __DIO_MasteryMode()
+    local m = _G.FarmMode
+    if m == "Farm Bone" then return "Bone" end
+    if m == "Farm Cake" then return "Cake" end
+    if m == "Farm Tyrant" then return "Tyrant" end
+    if m == "Farm Nearest" then return "Nearest" end
+    return "Level"
+end
 function __DIO_SyncMasteryIsland()
-    SelectIsland = (_G.FarmMode == "Farm Cake") and "Cake" or "Bone"
+    SelectIsland = __DIO_MasteryMode()
+end
+do
+    local __farmOpts = {"Farm Level", "Farm Bone", "Farm Cake", "Farm Tyrant", "Farm Nearest"}
+    local __savedMode = GetSetting("UI/Main/" .. tostring(__DIO_T["Select Farm"]), nil)
+    if type(__savedMode) == "string" and table.find(__farmOpts, __savedMode) then
+        _G.FarmMode = __savedMode
+    end
 end
 __DIO_SyncMasteryIsland()
 Tabs.Main:AddDropdown({
     Name = __DIO_T["Select Farm"],
     Description = "",
     Options = {"Farm Level", "Farm Bone", "Farm Cake", "Farm Tyrant", "Farm Nearest"},
-    Default = "Farm Level",
+    Default = _G.FarmMode,
     Callback = function(Value)
         _G.FarmMode = Value
         __DIO_SyncMasteryIsland()
@@ -8998,6 +9013,99 @@ Tabs.Main:AddSlider({
     Callback = function(Value)
         _G.HealthFarmMastery = Value
     end})
+__DIO_MasteryWarnT = {}
+function __DIO_MasteryWarn(tag, err)
+    local now = tick()
+    if now - (__DIO_MasteryWarnT[tag] or 0) < 5 then return end
+    __DIO_MasteryWarnT[tag] = now
+    warn("[DIO] Mastery " .. tostring(tag) .. " loi: " .. tostring(err))
+end
+function __DIO_MasteryDelay()
+    local d = tonumber(getgenv().MasterySpamDelay)
+    if d == nil then d = 2 end
+    if d < 0.1 then d = 0.1 end
+    return d
+end
+function __DIO_MasteryPace(flag, mob, base)
+    if not mob then return end
+    if not __DIO_UseMasteryNow(mob) then return end
+    if not __DIO_CanUseSkillOn(mob, base) then return end
+    local total = __DIO_MasteryDelay()
+    local t0 = tick()
+    while tick() - t0 < total do
+        if _G[flag] ~= true then return end
+        if not mob.Parent or not __DIO_MobAliveRoot(mob) then return end
+        __DIO_wait(0.2)
+    end
+end
+function __DIO_MasteryScan(names, maxDist)
+    local en = workspace:FindFirstChild("Enemies")
+    local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+    if not en or not hrp then return nil end
+    local best, bestD = nil, maxDist or math.huge
+    for _, mob in ipairs(en:GetChildren()) do
+        if mob:IsA("Model") and (names == nil or table.find(names, mob.Name)) then
+            local hum = mob:FindFirstChildOfClass("Humanoid")
+            local root = mob:FindFirstChild("HumanoidRootPart")
+            local ghost = false
+            if type(__DIO_IsGhost) == "function" then ghost = __DIO_IsGhost(mob) end
+            if hum and root and hum.Health > 0 and not ghost then
+                local d = (root.Position - hrp.Position).Magnitude
+                if d < bestD then
+                    bestD = d
+                    best = mob
+                end
+            end
+        end
+    end
+    return best
+end
+function __DIO_MasterySpawnCF(names)
+    local wo = workspace:FindFirstChild("_WorldOrigin")
+    local sp = wo and wo:FindFirstChild("EnemySpawns")
+    if not sp then return nil end
+    local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+    local best, bestD = nil, math.huge
+    for _, s in ipairs(sp:GetChildren()) do
+        if s:IsA("BasePart") then
+            for _, n in ipairs(names) do
+                if string.find(s.Name, n, 1, true) then
+                    local d = hrp and (s.Position - hrp.Position).Magnitude or 0
+                    if d < bestD then
+                        bestD = d
+                        best = s
+                    end
+                    break
+                end
+            end
+        end
+    end
+    if best then return best.CFrame * CFrame.new(0, 20, 0) end
+    return nil
+end
+function __DIO_GetMasteryTarget()
+    local mode = __DIO_MasteryMode()
+    if mode == "Cake" then
+        return GetConnectionEnemies(mastery1), CFrame.new(-1943.676513671875, 251.5095672607422, -12337.880859375)
+    elseif mode == "Bone" then
+        return GetConnectionEnemies(mastery2), CFrame.new(-9495.6806640625, 453.58624267578125, 5977.3486328125)
+    elseif mode == "Nearest" then
+        return __DIO_MasteryScan(nil, tonumber(_G.AuraDistance) or 300), nil
+    elseif mode == "Tyrant" then
+        local names = { "Serpent Hunter", "Skull Slayer", "Isle Champion", "Sun-kissed Warrior" }
+        return __DIO_MasteryScan(names), __DIO_MasterySpawnCF(names)
+    end
+    local ok, qd = pcall(QuestNeta)
+    if not ok then
+        __DIO_MasteryWarn("Level", qd)
+        return nil, nil
+    end
+    if type(qd) ~= "table" or type(qd[1]) ~= "string" or qd[1] == "" then return nil, nil end
+    local names = { qd[1] }
+    local fb = __DIO_MasterySpawnCF(names)
+    if not fb and typeof(qd[6]) == "CFrame" then fb = qd[6] * CFrame.new(0, 10, 0) end
+    return __DIO_MasteryScan(names), fb
+end
 Tabs.Main:AddToggle({
 Name = __DIO_T["Auto Mastery Fruits"],
 Description = "",
@@ -9012,36 +9120,22 @@ end)
 __DIO_SafeLoop(function()
   while __DIO_wait(Sec) do
     if _G.FarmMastery_Dev then
-      pcall(function()
-        pcall(__DIO_SyncMasteryIsland)
-        if SelectIsland == "Cake" then
-          local v = GetConnectionEnemies(mastery1)
-		  if v then
-		    repeat __DIO_wait()
-		      if not v.Parent then break end
-		      if not __DIO_MobAliveRoot(v) then break end
-		      __DIO_EquipFarmWeapon(v)
-		      MousePos = v.HumanoidRootPart.Position
-		      Attack.Mas(v,_G.FarmMastery_Dev)
-		    until _G.FarmMastery_Dev == false or v.Humanoid.Health <= 0 or not v.Parent
-		  else
-		    _tp(CFrame.new(-1943.676513671875, 251.5095672607422, -12337.880859375))
-		  end
-		elseif SelectIsland == "Bone" then
-          local v = GetConnectionEnemies(mastery2)
-		  if v then
-		    repeat __DIO_wait()
-		      if not v.Parent then break end
-		      if not __DIO_MobAliveRoot(v) then break end
-		      __DIO_EquipFarmWeapon(v)
-		      MousePos = v.HumanoidRootPart.Position
-		      Attack.Mas(v,_G.FarmMastery_Dev)
-		    until _G.FarmMastery_Dev == false or v.Humanoid.Health <= 0 or not v.Parent
-		  else
-		    _tp(CFrame.new(-9495.6806640625, 453.58624267578125, 5977.3486328125))
-		  end
+      local __ok, __err = pcall(function()
+        local v, fb = __DIO_GetMasteryTarget()
+        if v then
+          repeat __DIO_wait()
+            if not v.Parent then break end
+            if not __DIO_MobAliveRoot(v) then break end
+            __DIO_EquipFarmWeapon(v)
+            MousePos = v.HumanoidRootPart.Position
+            Attack.Mas(v, _G.FarmMastery_Dev)
+            __DIO_MasteryPace("FarmMastery_Dev", v, 60)
+          until _G.FarmMastery_Dev == false or v.Humanoid.Health <= 0 or not v.Parent
+        elseif fb then
+          _tp(fb)
         end
       end)
+      if not __ok then __DIO_MasteryWarn("Fruit", __err) end
     end
   end
 end, "L5523")
@@ -9055,92 +9149,50 @@ end})
 __DIO_SafeLoop(function()
   while __DIO_wait(Sec) do
     if _G.FarmMastery_G then
-      pcall(function()
-        pcall(__DIO_SyncMasteryIsland)
-        if SelectIsland == "Cake" then
-          local v = GetConnectionEnemies(mastery1)
-		  if v then
-		    repeat __DIO_wait(0.1)
-		      if not v.Parent then break end
-		      if not __DIO_MobAliveRoot(v) then break end
-		      MousePos = v.HumanoidRootPart.Position
-		      Attack.Masgun(v,_G.FarmMastery_G)
-              local __tool = plr.Character and plr.Character:FindFirstChildOfClass("Tool")
-              local __hr = v:FindFirstChild("HumanoidRootPart")
-              if not __DIO_CanUseSkillOn(v, 100) then
-                __DIO_wait(0.05)
-              elseif not __DIO_UseMasteryNow(v) then
-                __DIO_wait(0.05)
-              elseif not __tool or (__tool.ToolTip ~= "Gun" and __tool.Name ~= "Skull Guitar") then
-                weaponSc("Gun")
-                __DIO_wait(0.1)
-              elseif __tool.Name == "Skull Guitar" then
-                SoulGuitar = true
-                local __rem = __tool:FindFirstChild("RemoteEvent")
-                if __rem and _G.FarmMastery_G then
-                  pcall(function() __rem:FireServer("TAP", MousePos) end)
-                  vim1:SendMouseButtonEvent(0, 0, 0, true, game, 1);__DIO_wait(0.05)
-                  vim1:SendMouseButtonEvent(0, 0, 0, false, game, 1);__DIO_wait(0.05)
-                end
-              else
-                SoulGuitar = false
-                local __mods = replicated:FindFirstChild("Modules")
-                local __net  = __mods and __mods:FindFirstChild("Net")
-                local __shoot = __net and __net:FindFirstChild("RE/ShootGunEvent")
-                if __shoot and __hr and _G.FarmMastery_G then
-                  pcall(function() __shoot:FireServer(MousePos, { __hr }) end)
-                  vim1:SendMouseButtonEvent(0, 0, 0, true, game, 1);__DIO_wait(0.05)
-                  vim1:SendMouseButtonEvent(0, 0, 0, false, game, 1);__DIO_wait(0.05)
-                end
+      local __ok, __err = pcall(function()
+        local v, fb = __DIO_GetMasteryTarget()
+        if v then
+          repeat __DIO_wait(0.1)
+            if not v.Parent then break end
+            if not __DIO_MobAliveRoot(v) then break end
+            MousePos = v.HumanoidRootPart.Position
+            Attack.Masgun(v, _G.FarmMastery_G)
+            local __tool = plr.Character and plr.Character:FindFirstChildOfClass("Tool")
+            local __hr = v:FindFirstChild("HumanoidRootPart")
+            if not __DIO_CanUseSkillOn(v, 100) then
+              __DIO_wait(0.05)
+            elseif not __DIO_UseMasteryNow(v) then
+              __DIO_wait(0.05)
+            elseif not __tool or (__tool.ToolTip ~= "Gun" and __tool.Name ~= "Skull Guitar") then
+              weaponSc("Gun")
+              __DIO_wait(0.1)
+            elseif __tool.Name == "Skull Guitar" then
+              SoulGuitar = true
+              local __rem = __tool:FindFirstChild("RemoteEvent")
+              if __rem and _G.FarmMastery_G then
+                pcall(function() __rem:FireServer("TAP", MousePos) end)
+                vim1:SendMouseButtonEvent(0, 0, 0, true, game, 1); __DIO_wait(0.05)
+                vim1:SendMouseButtonEvent(0, 0, 0, false, game, 1); __DIO_wait(0.05)
               end
-		    until _G.FarmMastery_G == false or not v.Parent or (v:FindFirstChild("Humanoid") and v.Humanoid.Health <= 0)
-		    SoulGuitar = false
-		  else
-		    _tp(CFrame.new(-1943.676513671875, 251.5095672607422, -12337.880859375))
-	  	  end
-		elseif SelectIsland == "Bone" then
-          local v = GetConnectionEnemies(mastery2)
-		  if v then
-		    repeat __DIO_wait(0.1)
-		      if not v.Parent then break end
-		      if not __DIO_MobAliveRoot(v) then break end
-		      MousePos = v.HumanoidRootPart.Position
-		      Attack.Masgun(v,_G.FarmMastery_G)
-              local __tool = plr.Character and plr.Character:FindFirstChildOfClass("Tool")
-              local __hr = v:FindFirstChild("HumanoidRootPart")
-              if not __DIO_CanUseSkillOn(v, 100) then
-                __DIO_wait(0.05)
-              elseif not __DIO_UseMasteryNow(v) then
-                __DIO_wait(0.05)
-              elseif not __tool or (__tool.ToolTip ~= "Gun" and __tool.Name ~= "Skull Guitar") then
-                weaponSc("Gun")
-                __DIO_wait(0.1)
-              elseif __tool.Name == "Skull Guitar" then
-                SoulGuitar = true
-                local __rem = __tool:FindFirstChild("RemoteEvent")
-                if __rem and _G.FarmMastery_G then
-                  pcall(function() __rem:FireServer("TAP", MousePos) end)
-                  vim1:SendMouseButtonEvent(0, 0, 0, true, game, 1);__DIO_wait(0.05)
-                  vim1:SendMouseButtonEvent(0, 0, 0, false, game, 1);__DIO_wait(0.05)
-                end
-              else
-                SoulGuitar = false
-                local __mods = replicated:FindFirstChild("Modules")
-                local __net  = __mods and __mods:FindFirstChild("Net")
-                local __shoot = __net and __net:FindFirstChild("RE/ShootGunEvent")
-                if __shoot and __hr and _G.FarmMastery_G then
-                  pcall(function() __shoot:FireServer(MousePos, { __hr }) end)
-                  vim1:SendMouseButtonEvent(0, 0, 0, true, game, 1);__DIO_wait(0.05)
-                  vim1:SendMouseButtonEvent(0, 0, 0, false, game, 1);__DIO_wait(0.05)
-                end
+            else
+              SoulGuitar = false
+              local __mods = replicated:FindFirstChild("Modules")
+              local __net  = __mods and __mods:FindFirstChild("Net")
+              local __shoot = __net and __net:FindFirstChild("RE/ShootGunEvent")
+              if __shoot and __hr and _G.FarmMastery_G then
+                pcall(function() __shoot:FireServer(MousePos, { __hr }) end)
+                vim1:SendMouseButtonEvent(0, 0, 0, true, game, 1); __DIO_wait(0.05)
+                vim1:SendMouseButtonEvent(0, 0, 0, false, game, 1); __DIO_wait(0.05)
               end
-		    until _G.FarmMastery_G == false or not v.Parent or (v:FindFirstChild("Humanoid") and v.Humanoid.Health <= 0)
-		    SoulGuitar = false
-		  else
-		    _tp(CFrame.new(-9495.6806640625, 453.58624267578125, 5977.3486328125))
-	  	  end
+            end
+            __DIO_MasteryPace("FarmMastery_G", v, 100)
+          until _G.FarmMastery_G == false or not v.Parent or (v:FindFirstChild("Humanoid") and v.Humanoid.Health <= 0)
+          SoulGuitar = false
+        elseif fb then
+          _tp(fb)
         end
       end)
+      if not __ok then __DIO_MasteryWarn("Gun", __err) end
     end
   end
 end, "L5562")
@@ -9153,62 +9205,33 @@ Callback = function(Value)
 end})
 __DIO_SafeLoop(function()
   while __DIO_wait(Sec) do
-    pcall(function()
-      if _G.FarmMastery_S then
-        pcall(__DIO_SyncMasteryIsland)
-        if SelectIsland == "Cake" then
-          for _, v in next, GetInventoryCached() do
-            if type(v) == "table" then
-              if v.Type == "Sword" then
-                local __m = tonumber(v.Mastery) or 0
-                if __m < 600 then
-                  SwordName = v.Name
-                  local vm = GetConnectionEnemies(mastery1)
-                  if GetBP(SwordName) then
-                    if vm then
-                      repeat __DIO_wait(0.25)
-                        if not vm.Parent or not __DIO_MobAliveRoot(vm) then break end
-                        Attack.Sword(vm,_G.FarmMastery_S)
-                      until _G.FarmMastery_S == false or not vm.Parent or (vm:FindFirstChild("Humanoid") and vm.Humanoid.Health <= 0)
-                    else
-                      _tp(CFrame.new(-1943.676513671875, 251.5095672607422, -12337.880859375))
-                    end
-                  else
-                    replicated.Remotes.CommF_:InvokeServer("LoadItem",SwordName)
-                  end
-                  break
+    if _G.FarmMastery_S then
+      local __ok, __err = pcall(function()
+        for _, v in next, GetInventoryCached() do
+          if type(v) == "table" and v.Type == "Sword" then
+            local __m = tonumber(v.Mastery) or 0
+            if __m < 600 then
+              SwordName = v.Name
+              local vm, fb = __DIO_GetMasteryTarget()
+              if GetBP(SwordName) then
+                if vm then
+                  repeat __DIO_wait(0.25)
+                    if not vm.Parent or not __DIO_MobAliveRoot(vm) then break end
+                    Attack.Sword(vm, _G.FarmMastery_S)
+                  until _G.FarmMastery_S == false or not vm.Parent or (vm:FindFirstChild("Humanoid") and vm.Humanoid.Health <= 0)
+                elseif fb then
+                  _tp(fb)
                 end
+              else
+                replicated.Remotes.CommF_:InvokeServer("LoadItem", SwordName)
               end
-            end
-          end
-        elseif SelectIsland == "Bone" then
-          for _, v in next, GetInventoryCached() do
-            if type(v) == "table" then
-              if v.Type == "Sword" then
-                local __m = tonumber(v.Mastery) or 0
-                if __m < 600 then
-                  SwordName = v.Name
-                  local vm = GetConnectionEnemies(mastery2)
-                  if GetBP(SwordName) then
-                    if vm then
-                      repeat __DIO_wait(0.25)
-                        if not vm.Parent or not __DIO_MobAliveRoot(vm) then break end
-                        Attack.Sword(vm,_G.FarmMastery_S)
-                      until _G.FarmMastery_S == false or not vm.Parent or (vm:FindFirstChild("Humanoid") and vm.Humanoid.Health <= 0)
-                    else
-                      _tp(CFrame.new(-9495.6806640625, 453.58624267578125, 5977.3486328125))
-                    end
-                  else
-                    replicated.Remotes.CommF_:InvokeServer("LoadItem",SwordName)
-                  end
-                  break
-                end
-              end
+              break
             end
           end
         end
-      end
-    end)
+      end)
+      if not __ok then __DIO_MasteryWarn("Sword", __err) end
+    end
   end
 end, "L5655")
 Tabs.Settings:AddSection("Settings Farm")
@@ -9289,8 +9312,8 @@ Callback = function(Value)
 end})
 Tabs.Settings:AddToggle({
 Name = __DIO_T["Attack No Animation"],
-Description = "M1",
-Default = false,
+Description = "",
+Default = true, 
 Callback = function(Value)
   _G.AttackNoAnim = (Value == true)
 end})
@@ -12394,6 +12417,31 @@ __DIO_SafeLoop(function()
 end, "L8665")
 __DIO_FlagBorrow = __DIO_FlagBorrow or {}
 __DIO_BuyMeleeToggles = {}
+Tabs.Shop:AddSection("Fragments shop")
+Tabs.Shop:AddButton({
+Name = __DIO_T["Buy Refund Stats"],
+Description = "",
+Callback = function()
+  replicated.Remotes.CommF_:InvokeServer("BlackbeardReward","Refund","2")
+end})
+Tabs.Shop:AddButton({
+Name = __DIO_T["Buy Reroll Race"],
+Description = "",
+Callback = function()
+  replicated.Remotes.CommF_:InvokeServer("BlackbeardReward","Reroll","2")
+end})
+Tabs.Shop:AddButton({
+Name = __DIO_T["Buy Ghoul Race"],
+Description = "",
+Callback = function()
+  replicated.Remotes.CommF_:InvokeServer("Ectoplasm"," Change", 4)
+end})
+Tabs.Shop:AddButton({
+Name = __DIO_T["Buy Cyborg Race (2.5k)"],
+Description = "",
+Callback = function()
+  replicated.Remotes.CommF_:InvokeServer("CyborgTrainer"," Buy")
+end})
 Tabs.Shop:AddSection("Fighting Melee Styles")
 __DIO_BuyMeleeToggles.BuyBlackLeg = Tabs.Shop:AddToggle({
 Name = __DIO_T["Buy  BlackLeg"],
@@ -12769,8 +12817,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L9029")
-Tabs.Race:AddSection("Mystic Island / Full Moon")
-local FullMOOn = Tabs.Race:AddParagraph("FullMoon Status", "")
+
 __DIO_SafeLoop(function()
     while __DIO_wait(1) do
         pcall(function()
@@ -12805,20 +12852,6 @@ __DIO_SafeLoop(function()
 end, "L9079")
 -- [DIO-FIX] Da xoa stub trung lap __DIO_FindCruiseY o day: he thong Y thuyen day du
 -- duoc dinh nghia SOM ngay sau __DIO_BoatAssist (truoc moi vong Find), khong can stub.
-Tabs.Race:AddToggle({
-Name = __DIO_T["Auto Find Mirage Island"],
-Description = "",
-Default = false,
-Callback = function(Value)
-  _G.FindMirage = Value
-  -- FIX: truoc day tat Find Mirage khong don tween -> thuyen van bay toi goal cu mai mai
-  if not Value then
-      StopTween(false)
-      __DIO_CurTarget = nil
-      if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
-      if not __DIO_FindAnyOn() then __DIO_CruiseStop("mirage") end
-  end
-end})
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if _G.FindMirage then
@@ -12886,24 +12919,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L9119")
-Tabs.Race:AddToggle({
-    Name = __DIO_T["Esp Mirage Island"],
-    Description = "",
-    Value = false,
-    Callback = function(Value)
-        MirageIslandESP = Value
-        if MirageIslandESP then
-            task.spawn(function()
-                while MirageIslandESP do
-pcall(UpdateIslandMirageESP)
-                    __DIO_wait(1)
-                end
-            end)
-        else
-            UpdateIslandMirageESP()
-        end
-    end
-})
+
 UpdateIslandMirageESP = function()
     if MirageIslandESP then
         local island = workspace.Map:FindFirstChild("MysticIsland")
@@ -12938,19 +12954,7 @@ UpdateIslandMirageESP = function()
         if old then old:Destroy() end
     end
 end
-Tabs.Race:AddToggle({
-    Name = __DIO_T["Auto Tween To Mirage Island"],
-    Description = "",
-    Default = false,
-    Callback = function(Value)
-        _G.AutoMysticIsland = Value
-        if not Value then
-            StopTween(false)
-            __DIO_CurTarget = nil
-            if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
-        end
-    end
-})
+
 __DIO_SafeLoop(function()
     while __DIO_wait(1) do
         pcall(function()
@@ -12964,13 +12968,7 @@ __DIO_SafeLoop(function()
         end)
     end
 end, "L9242")
-Tabs.Race:AddToggle({
-Name = __DIO_T["Auto Tween To Highest Point"],
-Description = "",
-Default = false,
-Callback = function(Value)
-  _G.HighestMirage = Value
-end})
+
 __DIO_SafeLoop(function()
   while __DIO_wait(Sec) do
     if _G.HighestMirage then
@@ -12980,13 +12978,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L9262")
-Tabs.Race:AddToggle({
-Name = __DIO_T["Auto Collect Gear"],
-Description = "",
-Default = false,
-Callback = function(Value)
-  _G.TPGEAR = Value
-end})
+
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     pcall(function()
@@ -13003,13 +12995,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L9278")
-Tabs.Race:AddToggle({
-Name = __DIO_T["Change Transparency can see"],
-Description = "",
-Default = false,
-Callback = function(Value)
-  _G.can = Value
-end})
+
 __DIO_SafeLoop(function()
   while __DIO_wait(Sec) do
     pcall(function()
@@ -13030,13 +13016,7 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L9302")
-Tabs.Race:AddToggle({
-Name = __DIO_T["Auto Tween Advanced Fruit Dealer"],
-Description = "",
-Default = false,
-Callback = function(Value)
-  _G.Addealer = Value
-end})
+
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if _G.Addealer then
@@ -13048,13 +13028,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L9330")
-Tabs.Race:AddToggle({
-Name = __DIO_T["Auto Collect Mirage Chest"],
-Description = "",
-Default = false,
-Callback = function(Value)
-  _G.FarmChestM = Value
-end})
+
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if _G.FarmChestM then
@@ -13085,22 +13059,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L9348")
-Tabs.Race:AddButton({
-Name = __DIO_T["Talk With Stone"],
-Description = "",
-Callback = function()
-  replicated:WaitForChild("Remotes"):WaitForChild("CommF_"):InvokeServer("RaceV4Progress","Begin")
-  replicated:WaitForChild("Remotes"):WaitForChild("CommF_"):InvokeServer("RaceV4Progress","Check")
-  replicated:WaitForChild("Remotes"):WaitForChild("CommF_"):InvokeServer("RaceV4Progress","Teleport")
-  replicated:WaitForChild("Remotes"):WaitForChild("CommF_"):InvokeServer("RaceV4Progress","Continue")
-end})
-Tabs.Race:AddToggle({
-Name = __DIO_T["Auto Look At Moon"],
-Description = "",
-Default = false,
-Callback = function(Value)
-  LookM = Value
-end})
+
 __DIO_SafeLoop(function()
   while __DIO_wait(1) do
     if LookM then
@@ -13110,14 +13069,7 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L9398")
-Tabs.Race:AddToggle({
-    Name = __DIO_T["Look Moon + Auto V3"],
-    Description = "",
-    Default = false,
-    Callback = function(Value)
-        LookMV3 = Value
-    end
-})
+
 function MoveCamtoMoon()
     local moonDir = Lighting:GetMoonDirection()
     workspace.CurrentCamera.CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, workspace.CurrentCamera.CFrame.Position + moonDir)
@@ -13963,99 +13915,6 @@ __DIO_SafeLoop(function()
     end
   end
 end, "L10260")
-Tabs.Prehistoric:AddSection("Volcanic Crafting")
-Tabs.Prehistoric:AddButton({
-Name = __DIO_T["Craft Dragonheart"],
-Description = "",
-Callback = function()
-        local args = {
-            [1] = "CraftItem",
-            [2] = "Craft",
-            [3] = "Dragonheart"
-        }
-        __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
-    end
-})
-Tabs.Prehistoric:AddButton({
-Name = __DIO_T["Craft Dragonstorm"],
-Description = "",
-Callback = function()
-        local args = {
-            [1] = "CraftItem",
-            [2] = "Craft",
-            [3] = "Dragonstorm"
-        }
-        __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
-    end
-})
-Tabs.Prehistoric:AddButton({
-    Name = __DIO_T["Craft Dino Hood"],
-    Callback = function()
-        local args = {
-            [1] = "CraftItem",
-            [2] = "Craft",
-            [3] = "DinoHood"
-        }
-        __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
-    end
-})
-Tabs.Prehistoric:AddButton({
-    Name = __DIO_T["Craft T-Rex Skull"],
-    Callback = function()
-        local args = {
-            [1] = "CraftItem",
-            [2] = "Craft",
-            [3] = "TRexSkull"
-        }
-        __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
-    end
-})
-Tabs.Prehistoric:AddSection("Prehistoric Island")
-Tabs.Prehistoric:AddButton({
-    Name = __DIO_T["Craft Volcanic Magnet"],
-    Callback = function()
-        local RF = __SVC_RS.Modules.Net["RF/Craft"]
-        RF:InvokeServer(
-            "PossibleHardcode",
-            "Volcanic Magnet"
-        )
-    end
-})
-Tabs.Prehistoric:AddToggle({
-    Name = __DIO_T["Craft Volcanic Magnet"],
-    Default = false,
-    Callback = function(Value)
-        getgenv().AutoCraftVolcanic = Value
-    end
-})
-__DIO_SafeLoop(function()
-    local RF = __SVC_RS.Modules.Net["RF/Craft"]
-    while __DIO_wait(1) do
-        if getgenv().AutoCraftVolcanic then
-            pcall(function()
-                RF:InvokeServer(
-                    "PossibleHardcode",
-                    "Volcanic Magnet"
-                )
-            end)
-            getgenv().AutoCraftVolcanic = false
-        end
-    end
-end, "L10352")
-Tabs.Prehistoric:AddToggle({
-    Name = __DIO_T["Auto Find Prehistoric Island"],
-    Description = "",
-    Default = false,
-    Callback = function(Value)
-        _G.Prehis_Find = Value
-        if not Value then
-            StopTween(false)
-            __DIO_CurTarget = nil
-            if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
-            if not __DIO_FindAnyOn() then __DIO_CruiseStop("prehis") end
-        end
-    end
-})
 __DIO_SafeLoop(function()
     while __DIO_wait(Sec) do
         pcall(function()
@@ -14123,18 +13982,7 @@ __DIO_SafeLoop(function()
         end)
     end
 end, "L10385")
-Tabs.Prehistoric:AddToggle({
-    Name = __DIO_T["Auto Start Prehistoric Event"],
-    Default = false,
-    Callback = function(Value)
-        _G.AutoStartPrehistoric = Value
-        if not Value then
-            StopTween(false)
-            __DIO_CurTarget = nil
-            if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
-        end
-    end
-})
+
 __DIO_SafeLoop(function()
     while __DIO_wait(1) do
         if _G.AutoStartPrehistoric then
@@ -14157,20 +14005,8 @@ __DIO_SafeLoop(function()
             end)
         end
     end
-end, "L10492")
-Tabs.Prehistoric:AddToggle({
-    Name = __DIO_T["Auto Patch Prehistoric Event"],
-    Description = "",
-    Default = false,
-    Callback = function(Value)
-        _G.Prehis_Skills = Value
-        if not Value then
-            StopTween(false)
-            __DIO_CurTarget = nil
-            if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
-        end
-    end
-})
+end, "L10492") 
+
 __DIO_SafeLoop(function()
     while __DIO_wait(1) do
         if _G.Prehis_Skills then
@@ -14270,14 +14106,6 @@ __DIO_SafeLoop(function()
         end
     end
 end, "L10596")
-
-Tabs.Prehistoric:AddToggle({
-Name = __DIO_T["Auto Collect Dino Bones"],
-Description = "",
-Default = false,
-Callback = function(Value)
-  _G.Prehis_DB = Value
-end})
 __DIO_SafeLoop(function()
   while __DIO_wait(Sec) do
     pcall(function()
@@ -14291,13 +14119,6 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L10689")
-Tabs.Prehistoric:AddToggle({
-Name = __DIO_T["Auto Collect Dragon Eggs"],
-Description = "",
-Default = false,
-Callback = function(Value)
-  _G.Prehis_DE = Value
-end})
 __DIO_SafeLoop(function()
   while __DIO_wait(Sec) do
     pcall(function()
@@ -14307,13 +14128,6 @@ __DIO_SafeLoop(function()
     end)
   end
 end, "L10709")
-Toggle = Tabs.Prehistoric:AddToggle({
-Name = __DIO_T["Auto Reset When Complete Volcano"],
-Description = "",
-Default = false,
-Callback = function(Value)
-  _G.ResetPH = Value
-end})
 __DIO_SafeLoop(function()
   while __DIO_wait(Sec) do
     pcall(function()
@@ -14637,7 +14451,7 @@ Tabs.SeaEvent:AddSlider({
 Tabs.SeaEvent:AddToggle({
     Name = __DIO_T["Will Back When over 10km"],
     Description = "",
-    Default = true,
+    Default = false,
     Callback = function(Value)
         _G.FindBack10km = (Value == true)
     end
@@ -14651,6 +14465,122 @@ Tabs.SeaEvent:AddToggle({
     end
 })
 
+Tabs.SeaEvent:AddSection("Mystic Island / Full Moon")
+local FullMOOn = Tabs.SeaEvent:AddParagraph("FullMoon Status", "")
+
+Tabs.SeaEvent:AddToggle({
+Name = __DIO_T["Auto Find Mirage Island"],
+Description = "",
+Default = false,
+Callback = function(Value)
+  _G.FindMirage = Value
+  -- FIX: truoc day tat Find Mirage khong don tween -> thuyen van bay toi goal cu mai mai
+  if not Value then
+      StopTween(false)
+      __DIO_CurTarget = nil
+      if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
+      if not __DIO_FindAnyOn() then __DIO_CruiseStop("mirage") end
+  end
+end})
+
+Tabs.SeaEvent:AddToggle({
+    Name = __DIO_T["Esp Mirage Island"],
+    Description = "",
+    Value = false,
+    Callback = function(Value)
+        MirageIslandESP = Value
+        if MirageIslandESP then
+            task.spawn(function()
+                while MirageIslandESP do
+pcall(UpdateIslandMirageESP)
+                    __DIO_wait(1)
+                end
+            end)
+        else
+            UpdateIslandMirageESP()
+        end
+    end
+})
+
+Tabs.SeaEvent:AddToggle({
+    Name = __DIO_T["Auto Tween To Mirage Island"],
+    Description = "",
+    Default = false,
+    Callback = function(Value)
+        _G.AutoMysticIsland = Value
+        if not Value then
+            StopTween(false)
+            __DIO_CurTarget = nil
+            if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
+        end
+    end
+})
+Tabs.SeaEvent:AddToggle({
+Name = __DIO_T["Auto Tween To Highest Point"],
+Description = "",
+Default = false,
+Callback = function(Value)
+  _G.HighestMirage = Value
+end})
+
+Tabs.SeaEvent:AddToggle({
+Name = __DIO_T["Auto Collect Gear"],
+Description = "",
+Default = false,
+Callback = function(Value)
+  _G.TPGEAR = Value
+end})
+
+Tabs.SeaEvent:AddToggle({
+Name = __DIO_T["Change Transparency can see"],
+Description = "",
+Default = false,
+Callback = function(Value)
+  _G.can = Value
+end})
+
+Tabs.SeaEvent:AddToggle({
+Name = __DIO_T["Auto Tween Advanced Fruit Dealer"],
+Description = "",
+Default = false,
+Callback = function(Value)
+  _G.Addealer = Value
+end})
+
+Tabs.SeaEvent:AddToggle({
+Name = __DIO_T["Auto Collect Mirage Chest"],
+Description = "",
+Default = false,
+Callback = function(Value)
+  _G.FarmChestM = Value
+end})
+
+Tabs.SeaEvent:AddButton({
+Name = __DIO_T["Talk With Stone"],
+Description = "",
+Callback = function()
+  replicated:WaitForChild("Remotes"):WaitForChild("CommF_"):InvokeServer("RaceV4Progress","Begin")
+  replicated:WaitForChild("Remotes"):WaitForChild("CommF_"):InvokeServer("RaceV4Progress","Check")
+  replicated:WaitForChild("Remotes"):WaitForChild("CommF_"):InvokeServer("RaceV4Progress","Teleport")
+  replicated:WaitForChild("Remotes"):WaitForChild("CommF_"):InvokeServer("RaceV4Progress","Continue")
+end})
+
+Tabs.SeaEvent:AddToggle({
+Name = __DIO_T["Auto Look At Moon"],
+Description = "",
+Default = false,
+Callback = function(Value)
+  LookM = Value
+end})
+
+Tabs.SeaEvent:AddToggle({
+    Name = __DIO_T["Look Moon + Auto V3"],
+    Description = "",
+    Default = false,
+    Callback = function(Value)
+        LookMV3 = Value
+    end
+})
 Tabs.SeaEvent:AddToggle({
 Name = __DIO_T["Auto Sea Event"],
 Description = "",
@@ -15210,6 +15140,89 @@ Name = __DIO_T["Talk with kitsune statue"],
 Description = "",
 Callback = function()
   replicated.Modules.Net:FindFirstChild("RE/TouchKitsuneStatue"):FireServer()
+end})
+Tabs.SeaEvent:AddSection("Prehistoric Island")
+Tabs.SeaEvent:AddButton({
+    Name = __DIO_T["Craft Volcanic Magnet"],
+    Callback = function()
+        local RF = __SVC_RS.Modules.Net["RF/Craft"]
+        RF:InvokeServer(
+            "PossibleHardcode",
+            "Volcanic Magnet"
+        )
+    end
+})
+Tabs.SeaEvent:AddToggle({
+    Name = __DIO_T["Craft Volcanic Magnet"],
+    Default = false,
+    Callback = function(Value)
+        getgenv().AutoCraftVolcanic = Value
+    end
+})
+Tabs.SeaEvent:AddToggle({
+    Name = __DIO_T["Auto Find Prehistoric Island"],
+    Description = "",
+    Default = false,
+    Callback = function(Value)
+        _G.Prehis_Find = Value
+        if not Value then
+            StopTween(false)
+            __DIO_CurTarget = nil
+            if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
+            if not __DIO_FindAnyOn() then __DIO_CruiseStop("prehis") end
+        end
+    end
+})
+
+Tabs.SeaEvent:AddToggle({
+    Name = __DIO_T["Auto Start Prehistoric Event"],
+    Default = false,
+    Callback = function(Value)
+        _G.AutoStartPrehistoric = Value
+        if not Value then
+            StopTween(false)
+            __DIO_CurTarget = nil
+            if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
+        end
+    end
+})
+
+Tabs.SeaEvent:AddToggle({
+    Name = __DIO_T["Auto Patch Prehistoric Event"],
+    Description = "",
+    Default = false,
+    Callback = function(Value)
+        _G.Prehis_Skills = Value
+        if not Value then
+            StopTween(false)
+            __DIO_CurTarget = nil
+            if __DIO_LastTween then pcall(function() __DIO_LastTween:Cancel() end) __DIO_LastTween = nil end
+        end
+    end
+})
+
+Tabs.SeaEvent:AddToggle({
+Name = __DIO_T["Auto Collect Dino Bones"],
+Description = "",
+Default = false,
+Callback = function(Value)
+  _G.Prehis_DB = Value
+end})
+
+Tabs.SeaEvent:AddToggle({
+Name = __DIO_T["Auto Collect Dragon Eggs"],
+Description = "",
+Default = false,
+Callback = function(Value)
+  _G.Prehis_DE = Value
+end})
+
+Tabs.SeaEvent:AddToggle({
+Name = __DIO_T["Auto Reset When Complete Volcano"],
+Description = "",
+Default = false,
+Callback = function(Value)
+  _G.ResetPH = Value
 end})
 Tabs.SeaEvent:AddSection("Frozen Dimension")
 local SPYING = Tabs.SeaEvent:AddParagraph("Spy Status", "")
@@ -18560,33 +18573,70 @@ Description = "",
 Callback = function()
   replicated.Remotes.CommF_:InvokeServer("BlackbeardReward","Slingshot","2")
 end})
-Tabs.Shop:AddSection("Fragments shop")
+Tabs.Shop:AddSection("Volcanic Crafting")
 Tabs.Shop:AddButton({
-Name = __DIO_T["Buy Refund Stats"],
+Name = __DIO_T["Craft Dragonheart"],
 Description = "",
 Callback = function()
-  replicated.Remotes.CommF_:InvokeServer("BlackbeardReward","Refund","2")
-end})
+        local args = {
+            [1] = "CraftItem",
+            [2] = "Craft",
+            [3] = "Dragonheart"
+        }
+        __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
+    end
+})
 Tabs.Shop:AddButton({
-Name = __DIO_T["Buy Reroll Race"],
+Name = __DIO_T["Craft Dragonstorm"],
 Description = "",
 Callback = function()
-  replicated.Remotes.CommF_:InvokeServer("BlackbeardReward","Reroll","2")
-end})
+        local args = {
+            [1] = "CraftItem",
+            [2] = "Craft",
+            [3] = "Dragonstorm"
+        }
+        __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
+    end
+})
 Tabs.Shop:AddButton({
-Name = __DIO_T["Buy Ghoul Race"],
-Description = "",
-Callback = function()
-  replicated.Remotes.CommF_:InvokeServer("Ectoplasm"," Change", 4)
-end})
+    Name = __DIO_T["Craft Dino Hood"],
+    Callback = function()
+        local args = {
+            [1] = "CraftItem",
+            [2] = "Craft",
+            [3] = "DinoHood"
+        }
+        __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
+    end
+})
 Tabs.Shop:AddButton({
-Name = __DIO_T["Buy Cyborg Race (2.5k)"],
-Description = "",
-Callback = function()
-  replicated.Remotes.CommF_:InvokeServer("CyborgTrainer"," Buy")
-end})
-Tabs.SeaEvent:AddSection("Crafting Items")
-Tabs.SeaEvent:AddButton({
+    Name = __DIO_T["Craft T-Rex Skull"],
+    Callback = function()
+        local args = {
+            [1] = "CraftItem",
+            [2] = "Craft",
+            [3] = "TRexSkull"
+        }
+        __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
+    end
+})
+__DIO_SafeLoop(function()
+    local RF = __SVC_RS.Modules.Net["RF/Craft"]
+    while __DIO_wait(1) do
+        if getgenv().AutoCraftVolcanic then
+            pcall(function()
+                RF:InvokeServer(
+                    "PossibleHardcode",
+                    "Volcanic Magnet"
+                )
+            end)
+            getgenv().AutoCraftVolcanic = false
+        end
+    end
+end, "L10352")
+
+Tabs.Shop:AddSection("Crafting Sea Event")
+Tabs.Shop:AddButton({
 Name = __DIO_T["Craft SharkTooth"],
 Description = "",
 Callback = function()
@@ -18598,7 +18648,7 @@ Callback = function()
         __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
     end
 })
-Tabs.SeaEvent:AddButton({
+Tabs.Shop:AddButton({
 Name = __DIO_T["Craft TerrorJaw"],
 Description = "",
 Callback = function()
@@ -18610,7 +18660,7 @@ Callback = function()
         __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
     end
 })
-Tabs.SeaEvent:AddButton({
+Tabs.Shop:AddButton({
 Name = __DIO_T["Craft SharkAnchor"],
 Description = "",
 Callback = function()
@@ -18622,7 +18672,7 @@ Callback = function()
         __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
     end
 })
-Tabs.SeaEvent:AddButton({
+Tabs.Shop:AddButton({
 Name = __DIO_T["Craft LeviathanCrown"],
 Description = "",
 Callback = function()
@@ -18634,7 +18684,7 @@ Callback = function()
         __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
     end
 })
-Tabs.SeaEvent:AddButton({
+Tabs.Shop:AddButton({
 Name = __DIO_T["Craft LeviathanShield"],
 Description = "",
 Callback = function()
@@ -18646,7 +18696,7 @@ Callback = function()
         __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
     end
 })
-Tabs.SeaEvent:AddButton({
+Tabs.Shop:AddButton({
 Name = __DIO_T["Craft LeviathanBoat"],
 Description = "",
 Callback = function()
@@ -18658,7 +18708,7 @@ Callback = function()
         __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
     end
 })
-Tabs.SeaEvent:AddButton({
+Tabs.Shop:AddButton({
 Name = __DIO_T["Craft LegendaryScroll"],
 Description = "",
 Callback = function()
@@ -18670,7 +18720,7 @@ Callback = function()
         __SVC_RS.Remotes.CommF_:InvokeServer(unpack(args))
     end
 })
-Tabs.SeaEvent:AddButton({
+Tabs.Shop:AddButton({
 Name = __DIO_T["Craft MythicalScroll"],
 Description = "",
 Callback = function()
@@ -19851,27 +19901,72 @@ if getgenv().HideUi == true then
 end
 __DIO_BOOT("DIO HUB READY NOW")
 end
+__DIO_AutoExecQueued = false
 __DIO_QueueAutoExec = function()
     if getgenv().AutoExecutor ~= true then return end
     local __url = getgenv().DIO_SelfUrl
-        or "https://raw.githubusercontent.com/DIO482/Script-/refs/heads/main/DIO_Hub_Fixed%20(1)(6)%20FIXED.txt"
+        or "https://raw.githubusercontent.com/huw8592-rgb181816aajbbvaa838377hbba/Script-----------------/refs/heads/main/DIO_Hub.lua"
+    local __delay = math.max(0, math.floor(tonumber(getgenv().AutoExecutorDelay) or 30))
     local __esc = function(v)
-        return tostring(v or ""):gsub("\\", "\\\\"):gsub('"', '\\"')
+        local s = tostring(v or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\r", ""):gsub("\n", "")
+        return s
     end
-    local __code = 'getgenv().Team="' .. __esc(getgenv().Team or "Pirates") .. '"'
-        .. '\ngetgenv().SaveSettings=' .. tostring(getgenv().SaveSettings ~= false)
-        .. '\ngetgenv().Key="' .. __esc(getgenv().Key) .. '"'
-        .. '\ngetgenv().AutoExecutor=true'
-        .. '\ngetgenv().HideUi=' .. tostring(getgenv().HideUi == true)
-        .. '\nloadstring(game:HttpGet("' .. __url .. '"))()'     pcall(function()
+    local __lines = {
+        "repeat task.wait() until game:IsLoaded()",
+        "task.wait(" .. tostring(__delay) .. ")",
+        'getgenv().Team = "' .. __esc(getgenv().Team or "Pirates") .. '"',
+        "getgenv().SaveSettings = " .. tostring(_G.DIO_AutoSave ~= false),
+        'getgenv().Key = "' .. __esc(getgenv().Key) .. '"',
+        "getgenv().AutoExecutor = true",
+        "getgenv().HideUi = " .. tostring(getgenv().HideUi == true),
+    }
+    if getgenv().AutoRestoreToggles ~= nil then
+        table.insert(__lines, "getgenv().AutoRestoreToggles = " .. tostring(getgenv().AutoRestoreToggles == true))
+    end
+    if getgenv().AutoExecutorDelay ~= nil then
+        table.insert(__lines, "getgenv().AutoExecutorDelay = " .. tostring(__delay))
+    end
+    if getgenv().MasterySpamDelay ~= nil then
+        table.insert(__lines, "getgenv().MasterySpamDelay = " .. tostring(tonumber(getgenv().MasterySpamDelay) or 2))
+    end
+    if getgenv().DIO_SelfUrl ~= nil then
+        table.insert(__lines, 'getgenv().DIO_SelfUrl = "' .. __esc(__url) .. '"')
+    end
+    table.insert(__lines, 'local __ok, __err = pcall(function() loadstring(game:HttpGet("' .. __esc(__url) .. '"))() end)')
+    table.insert(__lines, 'if not __ok then warn("[DIO] AutoExecutor load failed: " .. tostring(__err)) end')
+    local __code = table.concat(__lines, "\n")
+    local __ok, __err = pcall(function()
+        local __q = nil
         if type(queue_on_teleport) == "function" then
-            queue_on_teleport(__code)
-        elseif syn and syn.queue_on_teleport then
-            syn.queue_on_teleport(__code)
-        else
-            warn("[DIO] AutoExecutor ON nhung executor khong co queue_on_teleport -> khong tu chay lai khi hop")
+            __q = queue_on_teleport
+        elseif syn and type(syn.queue_on_teleport) == "function" then
+            __q = syn.queue_on_teleport
         end
+        if not __q then error("executor khong co queue_on_teleport") end
+        __q(__code)
     end)
+    if __ok then
+        __DIO_AutoExecQueued = true
+    else
+        warn("[DIO] AutoExecutor ON nhung khong queue duoc: " .. tostring(__err))
+    end
+end
+if getgenv().AutoExecutor == true then
+    local __okHook, __errHook = pcall(function()
+        local __lp = game:GetService("Players").LocalPlayer
+        local __old = getgenv().__DIO_OnTeleportConn
+        if __old then pcall(function() __old:Disconnect() end) end
+        getgenv().__DIO_OnTeleportConn = __lp.OnTeleport:Connect(function(state)
+            if state ~= Enum.TeleportState.Started then return end
+            if getgenv().AutoExecutor == true and not __DIO_AutoExecQueued then
+                __DIO_QueueAutoExec()
+            end
+            __DIO_AutoExecQueued = false
+        end)
+    end)
+    if not __okHook then
+        warn("[DIO] AutoExecutor khong gan duoc OnTeleport: " .. tostring(__errHook))
+    end
 end
 local function __DIO_SafeStart(where)
     local ok, err = pcall(StartDioHub)
