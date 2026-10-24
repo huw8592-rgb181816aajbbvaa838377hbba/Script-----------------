@@ -1,11 +1,11 @@
 --[[
-    REDZ LIBRARY V5 — UI Remake (DIO-style + improvements)
-    - Larger default size + better touch targets
-    - Each option is a clear separated card (no sticking together)
-    - Smooth animations (open, hover, toggle, tab)
-    - Better text readability (size + contrast)
-    - Cleaner mobile minimizer
-    Logic / Toggle / Slider / Dropdown / Keybind giữ nguyên 100%.
+    REDZ LIBRARY V5 — UI Remake v2
+    - Option = card riêng, khoảng cách rõ, không dính liền
+    - Text to hơn, contrast cao hơn
+    - UI mặc định lớn hơn + touch target lớn
+    - Animation hover / mở tab / toggle mượt
+    - Minimizer mobile sạch, to, dễ bấm
+    Logic Toggle/Slider/Dropdown/Keybind giữ nguyên 100%.
 ]]
 
 local a=cloneref or(function(...)return...end)
@@ -93,8 +93,8 @@ Edge=Color3.fromRGB(206,255,228),
 White=Color3.fromRGB(255,255,255),
 Text=Color3.fromRGB(238,255,246),
 TextDim=Color3.fromRGB(178,238,206),
-Card=Color3.fromRGB(14,70,46),
-CardHover=Color3.fromRGB(28,120,78),
+Card=Color3.fromRGB(12,62,40),
+CardHover=Color3.fromRGB(22,105,68),
 Tab=Color3.fromRGB(56,224,126),
 Scrim=Color3.fromRGB(4,26,18),
 -- Nền kính (Window / Dialog / Notification)
@@ -186,8 +186,8 @@ GitHubOwner="tlredz"
 },
 Default={
 Theme="Darker",
-UISize=UDim2.fromOffset(620,440),
-SidebarWidth=168
+UISize=UDim2.fromOffset(640,460),
+SidebarWidth=170
 },
 
 Themes=r,
@@ -939,21 +939,21 @@ return table.concat(out)
 end local al=function(
 
 al, am, an)
--- Nút tab kiểu sidebar dọc: cao hơn, chữ to hơn, dễ bấm
+-- Nút tab sidebar: cao hơn, chữ to, dễ bấm
 local ao=E("TextButton","Button",an,{
-Size=UDim2.new(1,0,0,32),
+Size=UDim2.new(1,0,0,34),
 AutoButtonColor=false,
 Text=aCleanTitle(am.Title),
-TextSize=12,
+TextSize=13,
 TextXAlignment=Enum.TextXAlignment.Left,
 TextYAlignment=Enum.TextYAlignment.Center,
 TextTruncate=Enum.TextTruncate.AtEnd,
 TextTransparency=0,
 TextStrokeColor3=Color3.fromRGB(3,32,20),
-TextStrokeTransparency=0.7,
+TextStrokeTransparency=0.75,
 BackgroundTransparency=1,
 Elements={
-Corner=UDim.new(0,8),
+Corner=UDim.new(0,7),
 Padding={
 PaddingLeft=UDim.new(0,12),
 PaddingRight=UDim.new(0,8)
@@ -992,9 +992,9 @@ local aq=E("ScrollingFrame","Container",{
 Size=UDim2.new(1,0,1,0),
 Position=UDim2.new(0,0,1),
 AnchorPoint=Vector2.new(0,1),
-ScrollBarThickness=2.5,
+ScrollBarThickness=3,
 BackgroundTransparency=1,
-ScrollBarImageTransparency=0.25,
+ScrollBarImageTransparency=0.2,
 AutomaticCanvasSize=Enum.AutomaticSize.Y,
 ScrollingDirection=Enum.ScrollingDirection.Y,
 BorderSizePixel=0,
@@ -1007,10 +1007,10 @@ Padding={
 PaddingLeft=UDim.new(0,12),
 PaddingRight=UDim.new(0,12),
 PaddingTop=UDim.new(0,12),
-PaddingBottom=UDim.new(0,14)
+PaddingBottom=UDim.new(0,16)
 },
 ListLayout={
-Padding=UDim.new(0,8)
+Padding=UDim.new(0,9)
 }
 }
 })
@@ -1083,24 +1083,20 @@ OBJECTS=ar,
 BackgroundColor3="Glass.Card"
 }
 
--- Card option rõ ràng, tách biệt, dễ nhìn & dễ bấm
+-- Mỗi option là 1 card tách biệt, dễ nhìn
 local av=E("TextButton","Option",{
 AutomaticSize=Enum.AutomaticSize.Y,
-Size=UDim2.new(1,0,0,36),
+Size=UDim2.new(1,0,0,38),
 AutoButtonColor=false,
 Text="",
-BackgroundTransparency=0.12,
+BackgroundTransparency=0.08,
 ThemeTag=au,
 Elements={
 Corner=UDim.new(0,10),
 Stroke={
 ThemeTag={Color="Glass.Edge"},
-Thickness=1.2,
-Transparency=0.55
-},
-Padding={
-PaddingLeft=UDim.new(0,4),
-PaddingRight=UDim.new(0,4)
+Thickness=1.25,
+Transparency=0.45
 },
 Gradient={
 Rotation=115,
@@ -1119,10 +1115,10 @@ VerticalAlignment=Enum.VerticalAlignment.Center,
 Padding=UDim.new(0,3)
 },
 Padding={
-PaddingBottom=UDim.new(0,8),
-PaddingTop=UDim.new(0,8),
-PaddingLeft=UDim.new(0,6),
-PaddingRight=UDim.new(0,4)
+PaddingBottom=UDim.new(0,10),
+PaddingTop=UDim.new(0,10),
+PaddingLeft=UDim.new(0,8),
+PaddingRight=UDim.new(0,6)
 }
 },
 Childs={aq,at}
@@ -1130,12 +1126,13 @@ Childs={aq,at}
 }
 })
 
--- Entrance animation nhẹ khi option được tạo
+-- fade-in nhẹ khi tạo option
 task.defer(function()
-	if av and av.Parent then
-		av.BackgroundTransparency=1
-		J(av,"BackgroundTransparency",0.12,0.28):Play()
-	end
+if av and av.Parent then
+local tr=av.BackgroundTransparency
+av.BackgroundTransparency=1
+J(av,"BackgroundTransparency",tr,0.25):Play()
+end
 end)
 
 local aw=av.Holder local ax=function(
@@ -1715,7 +1712,7 @@ function ah:AddSection(av)
     local aw=V[self]
 
     local ax=E("Frame","Option",T[self].Container,{
-        Size=UDim2.new(1,0,0,30),
+        Size=UDim2.new(1,0,0,32),
         BackgroundTransparency=1
     })
 
@@ -1725,7 +1722,7 @@ function ah:AddSection(av)
         Size=UDim2.new(1,-25,1,-4),
         Position=UDim2.new(0,6,0,0),
         BackgroundTransparency=1,
-        TextSize=13,
+        TextSize=14,
         Text=av,
         ThemeTag={
             OBJECTS=aw,
@@ -1740,7 +1737,7 @@ function ah:AddSection(av)
         Position=UDim2.new(0,6,1,-1),
         AnchorPoint=Vector2.new(0,1),
         BorderSizePixel=0,
-        BackgroundTransparency=0.25,
+        BackgroundTransparency=0.2,
         Elements={
             Gradient={
                 Rotation=0,
@@ -1789,11 +1786,10 @@ az=ae[ay]==0
 end
 
 local aB=V[self]
-local aC,aD,aE=am(self,aw,ax,UDim2.new(1,-48,0,0))
+local aC,aD,aE=am(self,aw,ax,UDim2.new(1,-52,0,0))
 
--- Toggle lớn hơn, dễ bấm trên mobile
 local aF=E("Frame",aC,{
-Size=UDim2.new(0,44,0,22),
+Size=UDim2.new(0,46,0,24),
 Position=UDim2.new(1,-10,0.5),
 AnchorPoint=Vector2.new(1,0.5),
 Elements={
@@ -2128,7 +2124,7 @@ Corner=UDim.new(0.5,0)
 })
 
 local aM=E("Frame",aK,{
-Size=UDim2.new(0,10,0,16),
+Size=UDim2.new(0,12,0,18),
 BackgroundColor3=Color3.fromRGB(230,255,240),
 Position=UDim2.fromScale(0,0.5),
 AnchorPoint=Vector2.new(0.5,0.5),
@@ -3010,12 +3006,12 @@ ai.SetContent=ai.SetDescription
 ai.SetDesc=ai.SetDescription
 
 function aj:CreateMobileMinimizer(av)
--- Glow mềm phía sau (to hơn, sạch hơn)
+-- Glow mềm phía sau
 local aH=E("Frame","MobileMinimizerGlow",I,{
-Size=UDim2.fromOffset(72,72),
+Size=UDim2.fromOffset(74,74),
 Position=UDim2.fromScale(0.14,0.22),
 AnchorPoint=Vector2.new(0.5,0.5),
-BackgroundColor3=Color3.fromRGB(80,220,130),
+BackgroundColor3=Color3.fromRGB(70,210,120),
 BackgroundTransparency=0.55,
 BorderSizePixel=0,
 ZIndex=0,
@@ -3024,36 +3020,36 @@ Corner=UDim.new(1,0)
 }
 })
 
--- Nút mở/đóng UI: tròn, to, dễ bấm, liquid glass sạch
+-- Nút mở/đóng UI: tròn, to, sạch, dễ bấm
 local aw=E("ImageButton","MobileMinimizer",I,{
-Size=UDim2.fromOffset(54,54),
+Size=UDim2.fromOffset(56,56),
 Position=UDim2.fromScale(0.14,0.22),
 AnchorPoint=Vector2.new(0.5,0.5),
 AutoButtonColor=false,
-BackgroundColor3=Color3.fromRGB(40,180,100),
-BackgroundTransparency=0.15,
+BackgroundColor3=Color3.fromRGB(36,170,95),
+BackgroundTransparency=0.12,
 ScaleType=Enum.ScaleType.Fit,
 ZIndex=1,
 Elements={
 Corner=UDim.new(1,0),
 Padding={
-PaddingLeft=UDim.new(0,11),
-PaddingRight=UDim.new(0,11),
-PaddingTop=UDim.new(0,11),
-PaddingBottom=UDim.new(0,11)
+PaddingLeft=UDim.new(0,12),
+PaddingRight=UDim.new(0,12),
+PaddingTop=UDim.new(0,12),
+PaddingBottom=UDim.new(0,12)
 },
 Stroke={
-Color=Color3.fromRGB(160,255,200),
+ThemeTag={Color="Glass.Neon"},
 Thickness=2,
-Transparency=0.25
+Transparency=0.2
 }
 },
 Childs={
 E("Frame","Sheen",{
-Size=UDim2.new(1,-12,0,16),
-Position=UDim2.new(0,6,0,5),
+Size=UDim2.new(1,-14,0,16),
+Position=UDim2.new(0,7,0,6),
 BackgroundColor3=Color3.fromRGB(255,255,255),
-BackgroundTransparency=0.45,
+BackgroundTransparency=0.5,
 BorderSizePixel=0,
 Elements={
 Corner=UDim.new(1,0)
@@ -3066,17 +3062,17 @@ u(aw.Activated,function()
 ag:Minimize()
 end)
 
--- Press feedback animation
+-- Press feedback
 u(aw.MouseButton1Down,function()
-J(aw,"Size",UDim2.fromOffset(48,48),0.12):Play()
-J(aH,"Size",UDim2.fromOffset(64,64),0.12):Play()
+J(aw,"Size",UDim2.fromOffset(50,50),0.1):Play()
+J(aH,"Size",UDim2.fromOffset(66,66),0.1):Play()
 end)
 u(aw.MouseButton1Up,function()
-J(aw,"Size",UDim2.fromOffset(54,54),0.15):Play()
-J(aH,"Size",UDim2.fromOffset(72,72),0.15):Play()
+J(aw,"Size",UDim2.fromOffset(56,56),0.12):Play()
+J(aH,"Size",UDim2.fromOffset(74,74),0.12):Play()
 end)
 
--- halo bám theo viên bi khi kéo
+-- halo bám theo khi kéo
 u(aw:GetPropertyChangedSignal("Position"),function()
 aH.Position=aw.Position
 end)
@@ -3084,7 +3080,7 @@ u(aw:GetPropertyChangedSignal("BackgroundColor3"),function()
 aH.BackgroundColor3=aw.BackgroundColor3
 end)
 
--- halo "thở" nhẹ
+-- halo thở nhẹ
 local aP=j:Create(aH,TweenInfo.new(2.2,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true),{
 BackgroundTransparency=0.78
 })
@@ -4309,7 +4305,7 @@ local al=E("Folder","Components",ak)
 local am=E("Folder","Dropdowns",I)
 
 local an=E("Frame","TopBar",al,{
-Size=UDim2.new(1,0,0,36),
+Size=UDim2.new(1,0,0,38),
 BackgroundTransparency=1
 })
 
@@ -4319,7 +4315,7 @@ AutomaticSize=Enum.AutomaticSize.XY,
 Position=UDim2.new(0,15,0.5,0),
 AnchorPoint=Vector2.new(0,0.5),
 Text=ae.Title,
-TextSize=14,
+TextSize=15,
 BackgroundTransparency=1,
 ThemeTag={
 TextColor3="Glass.Text",
@@ -4335,7 +4331,7 @@ Text=ae.SubTitle,
 BackgroundTransparency=1,
 TextXAlignment="Left",
 TextYAlignment="Bottom",
-TextSize=10,
+TextSize=11,
 ThemeTag={
 TextColor3="Glass.TextDim",
 Font="Font.Normal"
@@ -4360,13 +4356,13 @@ Elements={
 Corner=UDim.new(0.2,0)
 }
 }),
--- Nút mở/thu UI trong header: to hơn, dễ bấm
+-- Nút thu/mở trong header
 E("ImageButton","Minimize",{
-Size=UDim2.new(0,26,0,26),
+Size=UDim2.new(0,28,0,28),
 Position=UDim2.new(1,-40,0.5),
 AnchorPoint=Vector2.new(1,0.5),
-BackgroundColor3=Color3.fromRGB(80,210,120),
-BackgroundTransparency=0.35,
+BackgroundColor3=Color3.fromRGB(50,190,110),
+BackgroundTransparency=0.25,
 Image="rbxassetid://10734896206",
 ImageColor3=Color3.fromRGB(238,255,246),
 ScaleType=Enum.ScaleType.Fit,
@@ -4380,9 +4376,9 @@ PaddingTop=UDim.new(0,5),
 PaddingBottom=UDim.new(0,5)
 },
 Stroke={
-Color=Color3.fromRGB(160,255,200),
+ThemeTag={Color="Glass.Neon"},
 Thickness=1.5,
-Transparency=0.3
+Transparency=0.25
 }
 },
 ThemeTag={
@@ -4397,11 +4393,11 @@ local ar=ap.Close
 
 -- Quầng sáng mềm sau viên bi mở UI
 E("Frame","MinimizeGlow",an,{
-Size=UDim2.new(0,36,0,36),
+Size=UDim2.new(0,38,0,38),
 Position=UDim2.new(1,-35,0.5),
 AnchorPoint=Vector2.new(1,0.5),
-BackgroundTransparency=0.6,
-BackgroundColor3=Color3.fromRGB(100,240,160),
+BackgroundTransparency=0.55,
+BackgroundColor3=Color3.fromRGB(90,230,150),
 BorderSizePixel=0,
 ZIndex=0,
 Elements={
@@ -4557,8 +4553,8 @@ Title="NO"
 }
 }
 
-u(aq.MouseEnter,function()J(aq,"BackgroundTransparency",0.15,0.15):Play()end)
-u(aq.MouseLeave,function()J(aq,"BackgroundTransparency",0.35,0.15):Play()end)
+u(aq.MouseEnter,function()J(aq,"BackgroundTransparency",0.1,0.15):Play()end)
+u(aq.MouseLeave,function()J(aq,"BackgroundTransparency",0.25,0.15):Play()end)
 
 u(ar.MouseEnter,function()ar.BackgroundTransparency=0.65 end)
 u(ar.MouseLeave,function()ar.BackgroundTransparency=1.00 end)
@@ -4589,11 +4585,11 @@ u(ar.Activated,function()
     as:Dialog(aA)
 end)
 
-local searchContainerHeight = 26
+local searchContainerHeight = 28
 
 local searchContainer = E("Frame", "SearchContainer", an, {
-    Size = UDim2.new(0, 185, 0, searchContainerHeight),
-    Position = UDim2.new(1, -62, 0.5, 0), -- Nằm giữa subtitle và nút thu nhỏ (-)
+    Size = UDim2.new(0, 190, 0, searchContainerHeight),
+    Position = UDim2.new(1, -66, 0.5, 0),
     AnchorPoint = Vector2.new(1, 0.5),
     BackgroundTransparency = 1,
     ZIndex = 5
